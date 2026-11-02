@@ -1,4 +1,4 @@
-# Project Exhibitionist Tweaks (PETweaks) v1.6.0
+<img width="376" height="360" alt="原版 00_00_00-00_00_30" src="https://github.com/user-attachments/assets/c6dbb5ad-a119-45f6-99f7-e39febc1f896" /># Project Exhibitionist Tweaks (PETweaks) v1.6.0
 
 适用于 **Project Exhibitionist v1.0.0**（Unity 2022 / Mono / 64 位）的运行时调整插件。  
 🔴<font color="red">注意：测试时游戏版本为1.0.0，不保证其他游戏版本能正常运行</font>
@@ -43,8 +43,8 @@
 | 界面 | **新增**：角色头像窗口移位 / 缩放 / 退远 / 加宽 / 改宽高比 |
 | 操作 | **新增**：I 键面板里双击服装格直接聚焦/穿脱 |
 
-<img width="640" height="608" alt="MOD效果 00_00_00-00_00_08" src="https://github.com/user-attachments/assets/ac68426a-80cd-492d-bbc5-fac1d282cf56" />
-<img width="640" height="616" alt="原版 00_00_00-00_00_08" src="https://github.com/user-attachments/assets/650a59a2-f5a9-4067-a14d-d773b9cd02f9" />
+MOD版胸部物理与原版对比：
+<img width="384" height="360" alt="MOD效果 00_00_00-00_00_06" src="https://github.com/user-attachments/assets/caa70568-54ca-474e-b474-ec32ebca6c06" /><img width="376" height="360" alt="原版 00_00_00-00_00_30" src="https://github.com/user-attachments/assets/592d0f6a-a939-4eac-98b9-4f4d9e11195b" />
 
 ---
 
