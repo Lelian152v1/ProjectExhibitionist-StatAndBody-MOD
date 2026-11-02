@@ -43,7 +43,9 @@
 | 界面 | **新增**：角色头像窗口移位 / 缩放 / 退远 / 加宽 / 改宽高比 |
 | 操作 | **新增**：I 键面板里双击服装格直接聚焦/穿脱 |
 
-<img width="640" height="608" alt="MOD效果 00_00_00-00_00_08" src="https://github.com/user-attachments/assets/cd8d14c1-544c-4fd7-a28d-916d5788c40b" /><img width="640" height="616" alt="原版 00_00_00-00_00_08" src="https://github.com/user-attachments/assets/091ca362-1cfd-4c58-a2c5-10ae081962eb" />
+<img width="640" height="608" alt="MOD效果 00_00_00-00_00_08" src="https://github.com/user-attachments/assets/ac68426a-80cd-492d-bbc5-fac1d282cf56" />
+<img width="640" height="616" alt="原版 00_00_00-00_00_08" src="https://github.com/user-attachments/assets/650a59a2-f5a9-4067-a14d-d773b9cd02f9" />
+
 ---
 
 ## 快速开始
