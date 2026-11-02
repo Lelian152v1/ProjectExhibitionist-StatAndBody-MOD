@@ -29,6 +29,18 @@
       <HintPath>D:\Game\A1753\Project Exhibitionist\Project Exhibitionist_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine.UIModule">
+      <HintPath>D:\Game\A1753\Project Exhibitionist\Project Exhibitionist_Data\Managed\UnityEngine.UIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>D:\Game\A1753\Project Exhibitionist\Project Exhibitionist_Data\Managed\UnityEngine.TextRenderingModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>D:\Game\A1753\Project Exhibitionist\Project Exhibitionist_Data\Managed\UnityEngine.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="Assembly-CSharp">
       <HintPath>D:\Game\A1753\Project Exhibitionist\Project Exhibitionist_Data\Managed\Assembly-CSharp.dll</HintPath>
       <Private>false</Private>

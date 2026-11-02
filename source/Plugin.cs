@@ -12,7 +12,7 @@ using UnityEngine.Rendering;
 
 namespace PETweaks
 {
-    [BepInPlugin("com.dsh.petweaks", "Project Exhibitionist Tweaks", "1.5.0")]
+    [BepInPlugin("com.dsh.petweaks", "Project Exhibitionist Tweaks", "1.6.0")]
     public class Plugin : BaseUnityPlugin
     {
         internal static ConfigEntry<bool>   CfgEnabled;
@@ -52,6 +52,13 @@ namespace PETweaks
         internal static ConfigEntry<float>  JiggleDamping;
         internal static ConfigEntry<float>  JiggleArmMeters;
         internal static ConfigEntry<float>  JiggleRotationScale;
+        internal static ConfigEntry<int>    ExtraClothSlots;
+        internal static ConfigEntry<float>  FaceCamOffsetY;
+        internal static ConfigEntry<float>  FaceCamScale;
+        internal static ConfigEntry<float>  FaceCamDistance;
+        internal static ConfigEntry<float>  FaceCamFovScale;
+        internal static ConfigEntry<float>  FaceCamAspect;
+        internal static ConfigEntry<string> PanelClothClick;
         internal static ConfigEntry<bool>   SideRandomize;
         internal static ConfigEntry<float>  SideRandomInterval;
         internal static ConfigEntry<float>  BodyKickRandomMul;
@@ -147,6 +154,25 @@ namespace PETweaks
                 "阻尼 c。越大越快停下；越小越容易过冲、晃得久（4~20）。");
             JiggleArmMeters = Config.Bind("10. Body Physics", "JiggleArmMeters", 0.12f,
                 "力臂长度（米）。位移换算成倾斜角用；越小，同样位移产生的倾斜越大、越容易拉长。");
+            FaceCamDistance = Config.Bind("12. HUD", "FaceCamDistance", 1f,
+                "面部摄像机离角色的距离倍率：1 = 原版，1.4 = 退远 40%（能看到更多身体）");
+            FaceCamFovScale = Config.Bind("12. HUD", "FaceCamFovScale", 1f,
+                "面部摄像机视野倍率：1 = 原版，1.3 = 视野更广（配合退远用）");
+            FaceCamAspect = Config.Bind("12. HUD", "FaceCamAspect", 0f,
+                "窗口宽高比（宽/高）：0 = 保持原版方形；0.75 = 竖长 3:4，能装下上半身");
+
+            FaceCamScale = Config.Bind("12. HUD", "FaceCamScale", 1f,
+                "面部摄像机窗口的缩放倍率，1 = 原始大小，0.8 = 缩小到 80%");
+
+            PanelClothClick = Config.Bind("13. QoL", "PanelClothClick", "Double",
+                "I 键面板里点击服装格的行为：Off = 只选中，Double = 双击穿脱，Single = 单击穿脱");
+
+            FaceCamOffsetY = Config.Bind("12. HUD", "FaceCamOffsetY", 0f,
+                "把面部摄像机窗口往上/下移动多少像素（正数=上移）。0 = 不动");
+
+            ExtraClothSlots = Config.Bind("11. Inventory", "ExtraClothSlots", 0,
+                "服装槽额外数量（原版 6）。实验性：会在运行时补数据并在 HUD 上克隆格子，0 = 不改");
+
             JiggleRotationScale = Config.Bind("10. Body Physics", "JiggleRotationScale", 0.5f,
                 "位移→倾斜角的比例。0 = 只平移不倾斜（最不容易拉长）；1 = 完全按力臂换算。");
 
@@ -163,10 +189,11 @@ namespace PETweaks
             UnityEngine.Object.DontDestroyOnLoad(go);
             go.AddComponent<Runner>();
 
+            try { ClothClick.Install(); } catch (Exception e) { Logger.LogWarning("cloth click install failed: " + e.Message); }
             try { YawPatch.Install(); }
             catch (Exception e) { Logger.LogWarning("yaw patch install failed: " + e.Message); }
 
-            Logger.LogInfo("PETweaks v1.5.0 loaded (persistent runner attached)");
+            Logger.LogInfo("PETweaks v1.6.0 loaded (persistent runner attached)");
         }
 
         internal static void Apply(string reason)
@@ -206,6 +233,8 @@ namespace PETweaks
         private void Update()
         {
             try { Inertia.Tick(Plugin.InertiaKick.Value); } catch { }
+            try { ClothSlots.Tick(Plugin.ExtraClothSlots.Value); } catch { }
+            try { FaceCam.Tick(Plugin.FaceCamOffsetY.Value); } catch { }
             try { SideRandom.Tick(Plugin.SideRandomInterval.Value, Plugin.SideRandomize.Value, Plugin.BodyAsymmetryMul.Value); } catch { }
 
             if (Time.unscaledTime < _nextApply) return;
@@ -1094,4 +1123,426 @@ namespace PETweaks
             _targetPos.SetValue(breast, pos + delta);
         }
     }
+
+    /// <summary>Experimental: add extra clothing slots (data lists + cloned HUD slots).</summary>
+    internal static class ClothSlots
+    {
+        private static bool _applied, _failed;
+        private static float _next;
+
+        internal static void Tick(int extra)
+        {
+            if (extra <= 0 || _applied || _failed) return;
+            if (Time.unscaledTime < _next) return;
+            _next = Time.unscaledTime + 2f;
+
+            try
+            {
+                Type pm = Tweaks.FindType("Features.Inventory.PlayerInventoryManager");
+                Type hud = Tweaks.FindType("Features.Inventory.UI.ClothHUDController");
+                if (pm == null || hud == null) return;
+
+                object inv = pm.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
+                          ?? UnityEngine.Object.FindObjectOfType(pm);
+                if (inv == null) return;
+
+                object controller = null;
+                foreach (UnityEngine.Object o in Resources.FindObjectsOfTypeAll(hud))
+                {
+                    Component c = o as Component;
+                    if (c == null || !c.gameObject.scene.IsValid()) continue;
+                    controller = o; break;
+                }
+                if (controller == null) return;
+
+                FieldInfo boundF = hud.GetField("_bound", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (boundF != null && !(bool)boundF.GetValue(controller)) return;   // 等 HUD 完成绑定
+
+                FieldInfo slotsF = hud.GetField("_slots", BindingFlags.NonPublic | BindingFlags.Instance);
+                IList uiSlots = slotsF?.GetValue(controller) as IList;
+                if (uiSlots == null || uiSlots.Count == 0) return;
+
+                FieldInfo maxF = pm.GetField("maxClothSlots", BindingFlags.NonPublic | BindingFlags.Instance);
+                int oldCount = (int)maxF.GetValue(inv);
+                int target = oldCount + extra;
+                if (uiSlots.Count >= target) { _applied = true; return; }
+
+                int need = target - uiSlots.Count;
+
+                // --- 1) 数据层：上限 + 4 个并行列表 ---
+                maxF.SetValue(inv, target);
+                AppendList(pm, inv, "clothSlots", null);
+                AppendList(pm, inv, "clothDurability", 0f);
+                AppendEnumList(pm, inv, "clothRarities");
+                AppendList(pm, inv, "clothVariants", -1);
+                for (int i = 1; i < need; i++)
+                {
+                    AppendList(pm, inv, "clothSlots", null);
+                    AppendList(pm, inv, "clothDurability", 0f);
+                    AppendEnumList(pm, inv, "clothRarities");
+                    AppendList(pm, inv, "clothVariants", -1);
+                }
+
+                // --- 2) UI：克隆格子 ---
+                Component lastSlot = uiSlots[uiSlots.Count - 1] as Component;
+                Component prevSlot = uiSlots.Count > 1 ? uiSlots[uiSlots.Count - 2] as Component : null;
+                if (lastSlot == null) { _failed = true; Plugin.Log("clothslots: last slot is null"); return; }
+
+                Vector2 step = Vector2.zero;
+                if (prevSlot != null)
+                {
+                    RectTransform a = prevSlot.transform as RectTransform;
+                    RectTransform b = lastSlot.transform as RectTransform;
+                    if (a != null && b != null) step = b.anchoredPosition - a.anchoredPosition;
+                }
+                if (step.sqrMagnitude < 1f) step = new Vector2(56f, 0f);
+
+                Transform parent = lastSlot.transform.parent;
+                Type slotType = lastSlot.GetType();
+                MethodInfo init = slotType.GetMethod("Init", new[] { typeof(int), hud });
+
+                for (int k = 0; k < need; k++)
+                {
+                    GameObject go = UnityEngine.Object.Instantiate(lastSlot.gameObject, parent, false);
+                    go.name = "ClothSlot_auto" + (uiSlots.Count + k);
+                    RectTransform rt = go.transform as RectTransform;
+                    RectTransform lastRt = lastSlot.transform as RectTransform;
+                    if (rt != null && lastRt != null)
+                        rt.anchoredPosition = lastRt.anchoredPosition + step * (k + 1);
+
+                    Component comp = go.GetComponent(slotType);
+                    init?.Invoke(comp, new object[] { uiSlots.Count + k, controller });
+                    uiSlots.Add(comp);
+                    IList serialized = hud.GetField("serializedSlots", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(controller) as IList;
+                    serialized?.Add(comp);
+                }
+
+                // --- 3) 索引数组 + 重建轮播 ---
+                FieldInfo idxF = hud.GetField("_uiToClothIndex", BindingFlags.NonPublic | BindingFlags.Instance);
+                int[] idx = new int[uiSlots.Count];
+                int[] oldIdx = idxF?.GetValue(controller) as int[];
+                for (int i = 0; i < idx.Length; i++) idx[i] = (oldIdx != null && i < oldIdx.Length) ? oldIdx[i] : -1;
+                idxF?.SetValue(controller, idx);
+
+                hud.GetMethod("RebuildCarousel", BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(controller, null);
+
+                _applied = true;
+                Plugin.Log($"clothslots: expanded {oldCount} -> {target} (ui {uiSlots.Count}, step {step})");
+
+                ExpandPanel(target);
+            }
+            catch (Exception e)
+            {
+                _failed = true;
+                Plugin.Log("clothslots EXCEPTION " + e.GetType().Name + ": " + e.Message);
+            }
+        }
+
+
+        /// <summary>同步扩展“物品栏”面板（I 键）里的服装格子。</summary>
+        private static void ExpandPanel(int target)
+        {
+            try
+            {
+                Type dialog = Tweaks.FindType("Features.Inventory.UI.InventoryDialogController");
+                if (dialog == null) { Plugin.Log("clothslots panel: dialog type not found"); return; }
+
+                object inst = null;
+                foreach (UnityEngine.Object o in Resources.FindObjectsOfTypeAll(dialog))
+                {
+                    Component c = o as Component;
+                    if (c == null || !c.gameObject.scene.IsValid()) continue;
+                    inst = o; break;
+                }
+                if (inst == null) { Plugin.Log("clothslots panel: no dialog instance in scene"); return; }
+
+                FieldInfo listF = dialog.GetField("clothSlots", BindingFlags.NonPublic | BindingFlags.Instance);
+                IList list = listF?.GetValue(inst) as IList;
+                if (list == null || list.Count == 0) { Plugin.Log("clothslots panel: list empty"); return; }
+
+                int need = target - list.Count;
+                if (need <= 0) { Plugin.Log($"clothslots panel: already {list.Count}"); return; }
+
+                Component last = list[list.Count - 1] as Component;
+                Component prev = list.Count > 1 ? list[list.Count - 2] as Component : null;
+                if (last == null) { Plugin.Log("clothslots panel: last slot null"); return; }
+
+                Vector2 step = Vector2.zero;
+                RectTransform a = prev?.transform as RectTransform;
+                RectTransform b = last.transform as RectTransform;
+                if (a != null && b != null) step = b.anchoredPosition - a.anchoredPosition;
+                if (step.sqrMagnitude < 1f) step = new Vector2(70f, 0f);
+
+                Type slotType = last.GetType();
+                Type kindType = null;
+                MethodInfo init = null;
+                foreach (MethodInfo m in slotType.GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    if (m.Name != "Init") continue;
+                    ParameterInfo[] ps = m.GetParameters();
+                    if (ps.Length == 3 && ps[1].ParameterType.IsEnum) { init = m; kindType = ps[1].ParameterType; break; }
+                }
+                if (init == null || kindType == null) { Plugin.Log("clothslots panel: Init(int, enum, int) not found"); return; }
+                object clothing = Enum.Parse(kindType, "Clothing");
+
+                RectTransform rowRt = last.transform.parent as RectTransform;
+                RectTransform firstRt = (list[0] as Component)?.transform as RectTransform;
+
+                // 新建“第二行”容器，继承原行的锚点/尺寸/布局组设置
+                GameObject row2 = new GameObject("ClothRow_auto", typeof(RectTransform));
+                RectTransform row2Rt = row2.transform as RectTransform;
+                row2Rt.SetParent(rowRt != null ? rowRt.parent : last.transform.parent, false);
+                if (rowRt != null)
+                {
+                    row2Rt.anchorMin = rowRt.anchorMin;
+                    row2Rt.anchorMax = rowRt.anchorMax;
+                    row2Rt.pivot = rowRt.pivot;
+                    row2Rt.sizeDelta = rowRt.sizeDelta;
+                    row2Rt.anchoredPosition = rowRt.anchoredPosition + new Vector2(0f, -(rowRt.sizeDelta.y + 8f));
+                    CopyLayout(rowRt.gameObject, row2);
+                }
+
+                for (int k = 0; k < need; k++)
+                {
+                    int idx = list.Count;
+                    GameObject go = UnityEngine.Object.Instantiate(last.gameObject, row2Rt, false);
+                    go.name = "ClothSlot_panel_auto" + idx;
+                    RectTransform rt = go.transform as RectTransform;
+                    if (rt != null && step.sqrMagnitude > 1f)
+                        rt.anchoredPosition = new Vector2(step.x * k, 0f);
+                    Component comp = go.GetComponent(slotType);
+                    init.Invoke(comp, new object[] { inst, clothing, idx });
+                    list.Add(comp);
+                }
+
+                dialog.GetMethod("RefreshAll", BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(inst, null);
+                Plugin.Log($"clothslots panel: expanded to {list.Count} (step {step})");
+            }
+            catch (Exception e)
+            {
+                Plugin.Log("clothslots panel EXCEPTION " + e.GetType().Name + ": " + e.Message);
+            }
+        }
+
+
+        private static void CopyLayout(GameObject src, GameObject dst)
+        {
+            var h = src.GetComponent<UnityEngine.UI.HorizontalLayoutGroup>();
+            if (h != null)
+            {
+                var d = dst.AddComponent<UnityEngine.UI.HorizontalLayoutGroup>();
+                d.spacing = h.spacing;
+                d.childAlignment = h.childAlignment;
+                d.childControlWidth = h.childControlWidth;
+                d.childControlHeight = h.childControlHeight;
+                d.childForceExpandWidth = h.childForceExpandWidth;
+                d.childForceExpandHeight = h.childForceExpandHeight;
+                d.reverseArrangement = h.reverseArrangement;
+                d.padding = new UnityEngine.RectOffset(h.padding.left, h.padding.right, h.padding.top, h.padding.bottom);
+                return;
+            }
+            var v = src.GetComponent<UnityEngine.UI.VerticalLayoutGroup>();
+            if (v != null)
+            {
+                var d = dst.AddComponent<UnityEngine.UI.VerticalLayoutGroup>();
+                d.spacing = v.spacing;
+                d.childAlignment = v.childAlignment;
+                d.childControlWidth = v.childControlWidth;
+                d.childControlHeight = v.childControlHeight;
+                d.childForceExpandWidth = v.childForceExpandWidth;
+                d.childForceExpandHeight = v.childForceExpandHeight;
+                d.reverseArrangement = v.reverseArrangement;
+                d.padding = new UnityEngine.RectOffset(v.padding.left, v.padding.right, v.padding.top, v.padding.bottom);
+            }
+        }
+
+        private static void AppendList(Type pm, object inv, string field, object value)
+        {
+            FieldInfo f = pm.GetField(field, BindingFlags.NonPublic | BindingFlags.Instance);
+            (f?.GetValue(inv) as IList)?.Add(value);
+        }
+
+        private static void AppendEnumList(Type pm, object inv, string field)
+        {
+            FieldInfo f = pm.GetField(field, BindingFlags.NonPublic | BindingFlags.Instance);
+            IList list = f?.GetValue(inv) as IList;
+            if (list == null) return;
+            Type elem = f.FieldType.GetGenericArguments()[0];
+            list.Add(Enum.ToObject(elem, 0));
+        }
+    }
+
+
+    /// <summary>按 RenderTexture 反查显示角色头像的 RawImage，并整体上移。</summary>
+    internal static class FaceCam
+    {
+        private static bool _done;
+        private static float _next;
+
+        internal static void Tick(float offsetY)
+        {
+            if (_done) return;
+            if (Time.unscaledTime < _next) return;
+            _next = Time.unscaledTime + 3f;
+
+            try
+            {
+                Type fc = Tweaks.FindType("ExhibitionistDemo.UI.PlayerFaceCam");
+                Type rawT = Type.GetType("UnityEngine.UI.RawImage, UnityEngine.UI");
+                if (fc == null || rawT == null) return;
+
+                Camera cam = null;
+                foreach (UnityEngine.Object o in Resources.FindObjectsOfTypeAll(fc))
+                {
+                    Component c = o as Component;
+                    if (c == null) continue;
+                    cam = c.GetComponent<Camera>();
+                    if (cam != null) break;
+                }
+                if (cam == null || cam.targetTexture == null) return;
+
+                PropertyInfo texProp = rawT.GetProperty("texture");
+                if (texProp == null) return;
+
+                foreach (UnityEngine.Object o in Resources.FindObjectsOfTypeAll(rawT))
+                {
+                    Component raw = o as Component;
+                    if (raw == null || !raw.gameObject.activeInHierarchy) continue;
+                    if (!ReferenceEquals(texProp.GetValue(raw), cam.targetTexture)) continue;
+
+                    RectTransform rt = raw.transform as RectTransform;
+                    if (rt == null) continue;
+
+                    // --- 取景：退远 / 加宽视野 / 竖长画面 ---
+                    float dist = Plugin.FaceCamDistance.Value;
+                    if (dist > 0.05f && Mathf.Abs(dist - 1f) > 0.01f)
+                    {
+                        FieldInfo offF = fc.GetField("offset", BindingFlags.Public | BindingFlags.Instance);
+                        Vector3 off = (Vector3)offF.GetValue(cam.GetComponent(fc));
+                        off.z *= dist;
+                        offF.SetValue(cam.GetComponent(fc), off);
+                        Plugin.Log($"facecam: offset.z x{dist} -> {off.z:0.000}");
+                    }
+                    float fovScale = Plugin.FaceCamFovScale.Value;
+                    if (fovScale > 0.05f && Mathf.Abs(fovScale - 1f) > 0.01f)
+                    {
+                        cam.fieldOfView *= fovScale;
+                        Plugin.Log($"facecam: fov -> {cam.fieldOfView:0.0}");
+                    }
+                    float aspect = Plugin.FaceCamAspect.Value;
+                    if (aspect > 0.05f && cam.targetTexture != null)
+                    {
+                        RenderTexture old = cam.targetTexture;
+                        int w = old.width;
+                        int h = Mathf.Max(1, Mathf.RoundToInt(w / aspect));
+                        var rtNew = new RenderTexture(w, h, old.depth, old.format) { name = old.name };
+                        rtNew.Create();
+                        cam.targetTexture = rtNew;
+                        texProp.SetValue(raw, rtNew);
+                        RectTransform wr = (raw.transform.parent != null ? raw.transform.parent : raw.transform) as RectTransform;
+                        if (wr != null) wr.sizeDelta = new Vector2(wr.sizeDelta.x, wr.sizeDelta.x / aspect);
+                        Plugin.Log($"facecam: rt {old.width}x{old.height} -> {w}x{h} (aspect {aspect})");
+                    }
+
+                    // 打印 4 层父级，便于确认哪一层才是“窗口”
+                    var sb = new System.Text.StringBuilder();
+                    Transform cur = rt;
+                    for (int i = 0; i < 4 && cur != null; i++)
+                    {
+                        RectTransform crt = cur as RectTransform;
+                        sb.Append($"[{i}] {cur.name} pos={(crt != null ? crt.anchoredPosition.ToString() : "?")} size={(crt != null ? crt.sizeDelta.ToString() : "?")}  ");
+                        cur = cur.parent;
+                    }
+                    Plugin.Log("facecam ui: " + sb);
+
+                    // 上移：改 RawImage 的父节点（通常是窗口根）
+                    Transform win = rt.parent != null ? rt.parent : rt;
+                    RectTransform wrt = win as RectTransform;
+                    if (wrt != null)
+                    {
+                        if (Mathf.Abs(offsetY) > 0.01f)
+                        {
+                            wrt.anchoredPosition = wrt.anchoredPosition + new Vector2(0f, offsetY);
+                            Plugin.Log($"facecam ui: moved '{wrt.name}' by {offsetY}px -> {wrt.anchoredPosition}");
+                        }
+                        float scale = Plugin.FaceCamScale.Value;
+                        if (scale > 0.05f && Mathf.Abs(scale - 1f) > 0.01f)
+                        {
+                            wrt.sizeDelta = wrt.sizeDelta * scale;
+                            wrt.localScale = Vector3.one;
+                            Plugin.Log($"facecam ui: scaled '{wrt.name}' x{scale} -> {wrt.sizeDelta}");
+                        }
+                    }
+                    _done = true;
+                    return;
+                }
+            }
+            catch (Exception e)
+            {
+                Plugin.Log("facecam EXCEPTION " + e.GetType().Name + ": " + e.Message);
+                _done = true;
+            }
+        }
+    }
+
+
+    /// <summary>I 键面板里点击服装格直接穿/脱。</summary>
+    internal static class ClothClick
+    {
+        private static Type _dialogType;
+        private static FieldInfo _selectedField;
+        private static MethodInfo _use;
+        private static bool _installed;
+        private static object _prev;
+
+        internal static void Install()
+        {
+            if (_installed) return;
+            string mode = Plugin.PanelClothClick.Value;
+            if (string.Equals(mode, "Off", StringComparison.OrdinalIgnoreCase)) return;
+
+            _dialogType = Tweaks.FindType("Features.Inventory.UI.InventoryDialogController");
+            if (_dialogType == null) { Plugin.Log("clothclick: dialog type not found"); return; }
+
+            MethodInfo target = null;
+            foreach (MethodInfo m in _dialogType.GetMethods(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (m.Name == "OnSlotClicked" && m.GetParameters().Length == 1) { target = m; break; }
+            }
+            if (target == null) { Plugin.Log("clothclick: OnSlotClicked not found"); return; }
+
+            _selectedField = _dialogType.GetField("_selected", BindingFlags.NonPublic | BindingFlags.Instance);
+            _use = _dialogType.GetMethod("UseSelectedSlot", BindingFlags.Public | BindingFlags.Instance);
+
+            var harmony = new Harmony("com.dsh.petweaks.clothclick");
+            harmony.Patch(target,
+                prefix: new HarmonyMethod(typeof(ClothClick).GetMethod(nameof(Prefix), BindingFlags.NonPublic | BindingFlags.Static)),
+                postfix: new HarmonyMethod(typeof(ClothClick).GetMethod(nameof(Postfix), BindingFlags.NonPublic | BindingFlags.Static)));
+            _installed = true;
+            Plugin.Log("clothclick installed (mode=" + mode + ")");
+        }
+
+        private static void Prefix(object __instance)
+        {
+            try { _prev = _selectedField?.GetValue(__instance); } catch { _prev = null; }
+        }
+
+        private static void Postfix(object __instance, object slot)
+        {
+            try
+            {
+                if (slot == null || _use == null) return;
+                Type st = slot.GetType();
+                object kind = st.GetProperty("Kind")?.GetValue(slot);
+                if (kind == null || !string.Equals(kind.ToString(), "Clothing", StringComparison.OrdinalIgnoreCase)) return;
+                if (!(bool)(st.GetProperty("HasItem")?.GetValue(slot) ?? false)) return;
+
+                bool single = string.Equals(Plugin.PanelClothClick.Value, "Single", StringComparison.OrdinalIgnoreCase);
+                if (!single && !ReferenceEquals(_prev, slot)) return;   // 双击模式：第二次点才穿脱
+                _use.Invoke(__instance, null);
+            }
+            catch (Exception e) { Plugin.Log("clothclick EXCEPTION " + e.GetType().Name + ": " + e.Message); }
+        }
+    }
+
 }
