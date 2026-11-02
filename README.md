@@ -1,6 +1,6 @@
 # Project Exhibitionist Tweaks (PETweaks) v1.6.0
 
-> 适用于 **Project Exhibitionist**（Unity 2022 / Mono / 64 位）的运行时调整插件。
+> 适用于 **Project Exhibitionist <font color="red">v1.0.0</font>**（Unity 2022 / Mono / 64 位）的运行时调整插件。
 > 内置 **BepInEx 5.4.23.6 (x64)**，解压即用，无需额外安装。
 >此文档为大肥鱼deepseek所写
 
