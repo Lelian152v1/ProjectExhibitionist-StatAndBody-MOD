@@ -1,4 +1,4 @@
-<img width="376" height="360" alt="原版 00_00_00-00_00_30" src="https://github.com/user-attachments/assets/c6dbb5ad-a119-45f6-99f7-e39febc1f896" /># Project Exhibitionist Tweaks (PETweaks) v1.6.0
+# Project Exhibitionist Tweaks (PETweaks) v1.6.0
 
 适用于 **Project Exhibitionist v1.0.0**（Unity 2022 / Mono / 64 位）的运行时调整插件。  
 🔴<font color="red">注意：测试时游戏版本为1.0.0，不保证其他游戏版本能正常运行</font>
