@@ -2,6 +2,7 @@
 
 > 适用于 **Project Exhibitionist**（Unity 2022 / Mono / 64 位）的运行时调整插件。
 > 内置 **BepInEx 5.4.23.6 (x64)**，解压即用，无需额外安装。
+>此文档为大肥鱼deepseek所写
 
 ---
 
