@@ -1,8 +1,8 @@
 # PETweaks 1.7.0 + 地图种子查看器
 
 > 一个包解决两件事：
-> 1. **PETweaks 插件** —— 运行时调整游戏数值（速度、掉落、磨损、体力、身体物理、服装槽、HUD 等）
-> 2. **地图种子查看器** —— 输入游戏里的种子，在浏览器里复现整张程序化城市地图（含真实地块贴图）
+> 1. **PETweaks 插件** —— 运行时调整游戏数值（速度、掉落、磨损、体力、身体物理、服装槽、HUD 等），**只改内存**，不写资源、不动存档、不联网；
+> 2. **地图种子查看器** —— 输入游戏里的种子，在浏览器里复现整张程序化城市地图（含真实地块贴图），并可与游戏实时同步。
 
 ---
 
@@ -11,10 +11,16 @@
 - [包内容](#包内容)
 - [安装](#安装)
 - [插件功能与默认值](#插件功能与默认值)
+- [预设（推荐收藏）](#预设推荐收藏)
+- [手感与界面调优](#手感与界面调优)
 - [地图查看器](#地图查看器)
 - [地图生成算法（完整）](#地图生成算法完整)
 - [游戏内默认数据](#游戏内默认数据)
 - [常见问题](#常见问题)
+- [日志说明](#日志说明)
+- [实现原理](#实现原理)
+- [已知限制](#已知限制)
+- [卸载](#卸载)
 - [版本记录](#版本记录)
 - [许可](#许可)
 
@@ -54,12 +60,16 @@ PETweaks-1.7.0/
 PETweaks v1.7.0 loaded (persistent runner attached)
 ```
 
-**卸载**：删掉上面四项即可，数值立刻恢复原版（存档里已生成的物品不会回滚）。
+调参：编辑 `BepInEx/config/com.dsh.petweaks.cfg` → **重启游戏**生效。
+
+> ⚠️ BepInEx 在运行中/退出时可能重写该文件，注释会被替换成插件内置说明。**预设请以本文档为准。**
 
 ### 地图查看器
 
 直接双击 `map-viewer/index.html`（Chrome / Edge 均可，离线可用）。
 注意不要单独移动 `index.html`——它靠同级的 `assets/tiles/` 读贴图。
+
+**卸载**：删掉插件四项即可，数值立刻恢复原版（存档里已生成的物品不会回滚）。
 
 ---
 
@@ -97,7 +107,7 @@ PETweaks v1.7.0 loaded (persistent runner attached)
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `WeightMultiplier` | 1 | 物品池权重等比缩放 |
+| `WeightMultiplier` | 1 | 物品池权重等比缩放，不改相对比例 |
 
 ### `[7. Wear]`
 
@@ -127,61 +137,67 @@ PETweaks v1.7.0 loaded (persistent runner attached)
 
 ### `[10. Body Physics]`
 
-游戏自带弹簧：
+游戏自带弹簧（Anime 风格）：
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `BreastJiggleMultiplier` | 1 | 乘 `kick` / `walkKick`（不含上限） |
-| `ButtJiggleMultiplier` | 1 | 乘 `kick` / `kickBack` / `squash` |
-| `DampingMultiplier` | 1 | 阻尼倍率 |
-| `FrequencyMultiplier` | 1 | 弹簧频率倍率 |
-| `SwayMultiplier` | 1 | 左右横向响应 |
-| `AsymmetryMultiplier` | 1 | 左右不同步 |
-| `CounterKickMultiplier` | 1 | 反向回弹 |
-| `KickRandomMultiplier` | 1 | 抖动随机性 |
-| `GainMultiplier` | 1 | 位移→旋转增益（最直接的幅度旋钮） |
-| `MaxAngleDegrees` | 0（=原版 32°） | 上下俯仰上限；横向是它的 0.5 倍，**没有独立横向上限** |
-| `StepBounce` | true | false 去掉走路脚步弹动 |
+| `BreastJiggleMultiplier` | 1 | 胸部冲量倍率（× `kick` / `walkKick`），越大越晃，2~3 已明显 |
+| `ButtJiggleMultiplier` | 1 | 臀部冲量倍率（× `kick` / `kickBack` / `squash`） |
+| `DampingMultiplier` | 1 | 阻尼倍率：小 = 晃得久，大 = 更快停 |
+| `FrequencyMultiplier` | 1 | 弹簧频率倍率：小 = 更慢更软，大 = 更弹 |
+| `SwayMultiplier` | 1 | 左右横向响应，想更"活"就调高 |
+| `AsymmetryMultiplier` | 1 | 左右不同步程度，高 = 两侧不再镜像 |
+| `CounterKickMultiplier` | 1 | 反向回弹强度，高 = 落地后摆更明显 |
+| `KickRandomMultiplier` | 1 | 每次抖动的随机性，高 = 动作不重复 |
+| `GainMultiplier` | 1 | 位移→旋转增益（**最直接的幅度旋钮**，可 <1） |
+| `MaxAngleDegrees` | 0（=原版 32°） | 胸【上下/俯仰】上限；横向是它的 0.5 倍，**没有独立横向上限** |
+| `StepBounce` | true | false = 去掉走路一顿一顿的弹动 |
+
+> ⚠️ 游戏里没有单独的"横向角度上限"变量：代码写死 `maxAngle × 0.5`，`MaxAngleDegrees` 同时决定上下和左右。
 
 插件自己加的横向惯性（Harmony 补丁）：
 
 | 键 | 默认 | 说明 |
 |---|---|---|
 | `JiggleMode` | Spring | Spring = 物理弹簧 / Simple = 旧版角度映射 |
-| `JiggleStiffness` | 40 | 刚度（20~120） |
-| `JiggleDamping` | 8 | 阻尼（4~20） |
-| `YawOffsetMeters` | 0.02 | 横向最大位移（**过大网格会被拉长**） |
-| `JiggleRotationScale` | 0.5 | 位移→倾斜比例 |
-| `JiggleArmMeters` | 0.12 | 力臂 |
-| `YawLagMaxDegrees` | 60 | 惯性倾斜角上限（建议 5~8） |
-| `YawLag` | 0 | Simple 模式的惯性强度 |
-| `SideRandomize` | true | 左右随机活跃侧 |
-| `SideRandomInterval` | 0.5 | 切换间隔（秒） |
+| `JiggleStiffness` | 40 | 刚度 k（20~120），越大越紧 |
+| `JiggleDamping` | 8 | 阻尼 c（4~20），越大越快停 |
+| `YawOffsetMeters` | 0.02 | **横向最大位移（米）★最易造成网格拉长** |
+| `JiggleRotationScale` | 0.5 | 位移→倾斜角比例；0 = 只平移不倾斜 |
+| `JiggleArmMeters` | 0.12 | 力臂长度 |
+| `YawLagMaxDegrees` | 60 | 惯性倾斜角上限，建议 5~8 |
+| `YawLag` | 0 | Simple 模式下的惯性强度 |
+| `SideRandomize` | true | 定期翻转 `asymmetry` 符号，随机决定哪侧更活跃 |
+| `SideRandomInterval` | 0.5 | 左右切换间隔（秒） |
 | `InertiaKick` | 0 | 旧版转向冲量，保留兼容 |
 
-### `[11. Inventory]`
+### `[11. Inventory]` 服装槽扩容（实验性）
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `ExtraClothSlots` | 0 | 服装槽额外数量（原版 6）；建议 ≤4 |
+| `ExtraClothSlots` | 0 | 在原版 6 个基础上额外增加；建议 ≤4 |
 
-实现：`maxClothSlots` + 补 4 个并行列表 + 克隆 HUD 格子 + 克隆面板格子（第二行容器）。
+实现（三层一起改）：`maxClothSlots` + 补 4 个并行列表 + 克隆 HUD 格子 + 克隆面板格子（第二行容器）。只影响运行时，不写存档、不改 prefab；出问题改回 0 重启即恢复。
 
-### `[12. HUD]`
+### `[12. HUD]` 角色头像窗口
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `FaceCamOffsetY` | 0 | 角色头像窗口上移像素 |
-| `FaceCamScale` | 1 | 窗口缩放 |
-| `FaceCamDistance` | 1 | 相机退远倍率 |
-| `FaceCamFovScale` | 1 | 视野倍率 |
-| `FaceCamAspect` | 0 | 宽高比（0 = 方形，0.78 = 竖长） |
+| `FaceCamOffsetY` | 0 | 窗口整体上移像素（正数=上移） |
+| `FaceCamScale` | 1 | 窗口缩放，0.85 = 85% |
+| `FaceCamDistance` | 1 | 相机退远倍率（1.45 = 能看到上半身） |
+| `FaceCamFovScale` | 1 | 视野倍率（配退远用，1.25） |
+| `FaceCamAspect` | 0 | 宽高比（宽/高）：0 = 方形，0.78 = 竖长 |
+
+**原理**：`PlayerFaceCam` 渲染到 `800×800` 的 `CielFaceCam` 渲染纹理，窗口是显示该纹理的 `RawImage`。位移/缩放改窗口 `RectTransform`；取景改 `offset.z` 与 `fieldOfView`；竖长重建渲染纹理为 `800×(800/aspect)`。
 
 ### `[13. QoL]`
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `PanelClothClick` | Double | I 面板点服装：Off / Double / Single |
+| `PanelClothClick` | Double | I 面板点击服装格：Off 只选中 / Double 双击 / Single 单击 |
+
+**注意**：衣服是"可交互对象"，双击对非 `WearableItemSO` 服装走 `SelectCloth()`（聚焦）分支——所以双击是让 HUD 聚焦到该件服装，而非直接穿脱，这是原版设计。
 
 ### `[14. Map]`
 
@@ -196,12 +212,11 @@ PETweaks v1.7.0 loaded (persistent runner attached)
 
 **地图实时同步**（默认开）：
 
-- 插件在 `127.0.0.1` 上开一个**系统自动分配端口**的只限本机服务，把游戏**实际生成**的区块（区块名 / 旋转 / 每个槽位的地块）提供给查看器；
+- 插件在 `127.0.0.1` 上开一个**系统自动分配端口**的只限本机服务，把游戏**实际生成**的区块提供给查看器；
 - **不需要管理员、不写注册表、不改防火墙**（只绑回环地址，外部不可达）；
 - 进图后自动打开 `http://127.0.0.1:<端口>/`，查看器每 0.5 秒增量拉取，**边走边点亮**；
-- 连上后**自动把种子填进输入框并应用**；
-- 传回角色当前格，查看器**自动跟随并居中**（工具栏「跟随角色」可关）；
-- 数据源优先取**实际生成的区块**（`spawnedZones`），能反映运行时的 POI 替换，而不是仅取计划；实测数据在查看器里用**青色描边**标出，区块旋转取游戏真实值，与"确定性推算"的区域一眼可分；
+- 连上后**自动把种子填进输入框并应用**；传回角色当前格，查看器**自动跟随并居中**（工具栏「跟随角色」可关）；
+- 数据源优先取**实际生成的区块**（`spawnedZones`），能反映运行时的 POI 替换；实测数据用**青色描边**标出，区块旋转取游戏真实值；
 - 关掉浏览器后刷新标签页即可重连；日志里会打印当前端口。
 
 左上角显示内容（默认开启）：
@@ -216,6 +231,51 @@ Z: City10
 
 ---
 
+## 预设
+
+> 配置文件可能被程序重写，**请以本节为准**。
+
+### 幅度档
+
+| 档位 | 键值 |
+|---|---|
+| **偏软（日常）** | `BreastJiggleMultiplier=2.2` `ButtJiggleMultiplier=1.6` `GainMultiplier=0.7` `SwayMultiplier=1.2` `YawOffsetMeters=0.02` `JiggleRotationScale=0.12` `MaxAngleDegrees=45` |
+| **更小** | `GainMultiplier=0.55` `YawOffsetMeters=0.015` `JiggleRotationScale=0.06` |
+| **更大（会拉长网格）** | `GainMultiplier=1.0` `YawOffsetMeters=0.035` `JiggleRotationScale=0.3` `MaxAngleDegrees=60` |
+
+### 回复档（只影响收敛速度）
+
+| 档位 | 键值 | 手感 |
+|---|---|---|
+| **正常** | `JiggleStiffness=55` `JiggleDamping=11` | 收得快，跑停后几乎无余摆 |
+| **偏软** | `JiggleStiffness=35` `JiggleDamping=6.5` | 跑停后还有 2~3 次余摆 |
+| **更软** | `JiggleStiffness=25` `JiggleDamping=4` | 明显晃动、过冲更大 |
+
+### 界面档
+
+| 目标 | 键值 |
+|---|---|
+| 头像窗口竖长（能看上半身） | `FaceCamDistance=1.45` `FaceCamFovScale=1.25` `FaceCamAspect=0.78` `FaceCamScale=0.85` |
+| 再远一点 | `FaceCamDistance=1.7` |
+| 放大 | `FaceCamScale=1.0`、`FaceCamAspect=0.9` |
+| 服装 +2 格 | `ExtraClothSlots=2` |
+
+---
+
+## 手感与界面调优
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| **运动时胸部被拉长** | 位移把骨骼推离锚点，蒙皮被拽过去 | 先降 `YawOffsetMeters`，再降 `JiggleRotationScale`；不要靠加 `MaxAngleDegrees` 弥补 |
+| **跑停后没有余摆** | 阻尼/刚度过大 | 降到「回复档 偏软」 |
+| **晃得太夸张、撞上限** | 冲量过大 | 降 `BreastJiggleMultiplier` 与 `GainMultiplier` |
+| **走路一顿一顿弹** | 脚步冲量 | `StepBounce=false` |
+| **只有乳头在动、根不动** | 模型只有两根兄弟骨，根部靠位移驱动 | 见「实现原理」，属模型限制 |
+| **服装格超出屏幕** | 面板行宽固定 | 插件会自动放第二行；还是挤就减少 `ExtraClothSlots` |
+| **头像窗口挡住 HUD** | 窗口默认在右下 | 调 `FaceCamOffsetY` 上移 |
+
+---
+
 ## 地图查看器
 
 打开 `map-viewer/index.html`。
@@ -224,15 +284,15 @@ Z: City10
 
 - **种子输入**：填入游戏里的 `SEED`，点「应用」
 - **坐标跳转**：输入 `x, y`（格坐标）或「世界坐标」模式（米），点「跳转」
-- **出生点标记**：`(0,0)` 绿圈；**滑出视野时，屏幕边缘出现绿色箭头 + 距离标签**（`出生点 1.2 km`）
+- **出生点标记**：`(0,0)` 绿圈；滑出视野时，屏幕边缘出现绿色箭头 + 距离标签
 - **悬停详情**：格坐标、世界坐标、街区、区块 + 尺寸 + 旋转、每个槽位的地块名
-- **缩放**：10 ~ **350 px/格**（滚轮以鼠标为中心）
+- **缩放**：10 ~ 350 px/格（滚轮以鼠标为中心）
 - **图例 / 概率面板**：街区权重、8 种 POI 占比与平均间距
 - **只看 POI**、**地铁 2 格间距圈**、**街区底色**、**圆形小地图框**
-- **Classic 限制**（红色开关，默认关）：**仅 0~4 级**排位/普通模式需要开启——按 `RankPoiPolicy` 禁用 泳池/商场/地铁/公园 并移除地铁区块；Rank 05 或管理员**不要开**（限制已解除）
-- **模拟干旱 POI**（默认关）：按节奏标记游戏可能强插的便利店/泳池/美术馆，用橙色虚线框示意——**仅演示，不代表真实位置**（见工具栏开关旁说明）
+- **Classic 限制**（红色开关，默认关）：仅 0~4 级排位/普通模式需要开启——按 `RankPoiPolicy` 禁用 泳池/商场/地铁/公园 并移除地铁区块；Rank 05 或管理员不要开
+- **模拟干旱 POI**（默认关）：按节奏标记游戏可能强插的便利店/泳池/美术馆，用橙色虚线框示意（仅演示）
 - **模式说明横幅**：页面顶部固定提示"本视图 = Free 模式确定性布局"
-- **实时同步**：插件自动打开 `http://127.0.0.1:<端口>/` 时，查看器每 0.5 秒增量拉取游戏**实际生成结果**，用青色描边标出；`file://` 打开时可用「加载实际结果」手动导入 JSON
+- **实时同步**：插件打开时自动拉取游戏实际生成结果，青色描边标出；`file://` 打开时可用「加载实际结果」手动导入 JSON
 
 ### 坐标约定
 
@@ -272,7 +332,7 @@ Z: City10
 | 2 | **POI 干旱/近期补偿** | ✅（仅非 Free） | 强插 Kombini/Pool/ArtGallery + 按近期见过的类型降权重抽 + 前进走廊过滤 + 大型 POI 冷却（2000 米） |
 | 3 | **RankPoiPolicy 限制** | ✅（仅 Classic/Guided 且非管理员） | rank 不是 `hornyslut_declared` 且非管理员时，**禁止 Pool/Mall/Subway/Park**，并移除地铁区块 |
 | 4 | **travelOffset** | ✅ | 解析用 `cell + travelOffset`；平时 `(0,0)`，远距离世界原点重设后会变，且会清缓存 |
-| 5 | **地图光照质量（目录）** | ❌ 已核对 | `Balanced/Original/Performance` 6 个 MapCatalog 的**区块权重与地铁标志完全一致**，只影响渲染，不影响布局 |
+| 5 | **地图光照质量（目录）** | ❌ 已核对 | 6 个 MapCatalog 的**区块权重与地铁标志完全一致**，只影响渲染，不影响布局 |
 
 因此：
 
@@ -348,11 +408,10 @@ if 本格是地铁:
     p1 = SubwayPriority(x, y) = hash(seed ^ 0x6D2B79F5, x, y)
     对 i,j ∈ [-1..1]（跳过 0,0）:
         nx = x+i, ny = y+j
-        若 SelectBaseChunkForSpacing(nx, ny) 是地铁:      // 邻居的原始区块
+        若 SelectBaseChunkForSpacing(nx, ny) 是地铁:
             p2 = SubwayPriority(nx, ny)
             若 p2 > p1 或 (p2 == p1 且 ComesBefore(邻居, 本格)):
                 本格 = SelectNonSubwayReplacement(本格, Advance(selectionHash ^ 0xA511E9B3))
-                // 从同尺寸的非地铁区块里按权重抽一个
 ```
 
 ### 5. 地块（Zone）
@@ -379,8 +438,6 @@ if (advance(h ^ 0xC2B2AE35) % 3) != 0:   // 2/3 概率被拒
 
 ### 6. 特殊建筑间距（POI）
 
-算出区块和地块后，还要做一次"特殊建筑间距"裁决（`EnforceSpecialSpacing`）：
-
 ```
 if 本格不含特殊地块（且区块不是"永远特殊"）: 保持原样
 else:
@@ -388,17 +445,14 @@ else:
     else: 降级
 ```
 
-`SpecialCandidateWins` 用 `SpecialPriority(cell) = hash(seed ^ -1255572915, x, y)`，
-扫描一个**不对称窗口** `i,j ∈ [-(maxLarge-1+2) .. (本格尺寸-1+2)]`（1×1 时为 `[-5..2]`），
-对每个窗口内、足迹间距 ≤2、且本身含特殊的邻居做优先级比较。
+`SpecialCandidateWins` 用 `SpecialPriority(cell) = hash(seed ^ -1255572915, x, y)`，扫描一个**不对称窗口** `i,j ∈ [-(maxLarge-1+2) .. (本格尺寸-1+2)]`（1×1 时为 `[-5..2]`）。
 
 **降级规则（`BuildNonSpecialReplacement`）**：
 
 - 区块**不是**"永远特殊"（如 Mono 1x1）→ 同一区块、同一哈希，**排除特殊地块重抽**；
 - 区块**是**"永远特殊"（含地铁的区块、3×3、4×4）→ 用 `h2 = hash(seed ^ -776648139, x, y)` 从小区块里抽一个替换，再排除特殊地块重抽。
 
-> "永远特殊"的判定：`containsSubway == true`，或该区块池里**所有**地块都是特殊地块。
-> 所以 **Mono 3x3 / Mono 4x4 落败时会整个变成一个 1×1 普通区块**。
+> "永远特殊"的判定：`containsSubway == true`，或该区块池里**所有**地块都是特殊地块。所以 **Mono 3x3 / Mono 4x4 落败时会整个变成一个 1×1 普通区块**。
 
 ### 7. 放置
 
@@ -471,8 +525,6 @@ T / Subway 额外有 Half 池：`Residential_2(Half) 100`、`Residential_3(Half)
 
 ### 特殊目标点（POI）
 
-由「区块自带地块池」里的地块名判定：
-
 | POI | 判定关键字 | 所在区块 |
 |---|---|---|
 | 便利店 Kombini | `Kombini` | Mono 1x1 |
@@ -516,7 +568,7 @@ T / Subway 额外有 Half 池：`Residential_2(Half) 100`、`Residential_3(Half)
 分两种情况：
 
 - **区块 / 旋转 / 普通地块不一致** → 先检查三件事：种子一致、查看器用了同目录的 `assets/tiles`、没有改错种子。这部分已用 49 格逐格校验。
-- **POI（游泳馆/美术馆/便利店/地铁等）位置不一样** → 正常现象。查看器显示的是确定性基础布局；游戏会在你走 120 米没碰到 POI 时**强制插入**便利店/泳池/美术馆，并把它附近 ≤2 格内的其它特殊建筑降级。这跟行走路径有关，无法靠种子复现。
+- **POI（游泳馆/美术馆/便利店/地铁等）位置不一样** → 正常现象。查看器显示的是确定性基础布局；游戏会在你走 120 米没碰到 POI 时强制插入便利店/泳池/美术馆，并把它附近 ≤2 格内的其它特殊建筑降级。这跟行走路径有关，无法靠种子复现。
 
 **Q：找不到地铁？**
 占比 0.26%，平均 23 km（约 380 格）。可以用查看器输入种子后搜索「地铁」标记再前往。
@@ -532,15 +584,102 @@ T / Subway 额外有 Half 池：`Residential_2(Half) 100`、`Residential_3(Half)
 
 ---
 
+## 日志说明
+
+`BepInEx/LogOutput.log` 每 5 秒输出：
+
+```text
+[tick] speed=2 rarity=1 lootTables=0 wear=63 durability=88 trash=3 stamina=1 body=14
+```
+
+| 字段 | 含义 |
+|---|---|
+| `speed` | 玩家控制器数量（菜单 0，进场景 1~2） |
+| `rarity` | 稀有度设置对象（通常 1） |
+| `lootTables` | 物品池数量（`WeightMultiplier=1` 时为 0 正常） |
+| `wear` / `durability` | 被改写的服装 / 道具数量 |
+| `trash` | 垃圾桶档位数（通常 3） |
+| `stamina` | 被改写的角色数 |
+| `body` | 物理参数组数（最多 14） |
+
+功能性日志：
+
+```text
+clothslots: expanded 6 -> 8 (ui 8, step ...)
+facecam: offset.z x1.45 -> -1.160
+clothclick installed (mode=Double)
+mapinfo: seed=... cellSize=60 travel=(0,0) catalog=MapCatalog_PerformanceOriginal
+mapinfo: mode=Classic rank=... admin=... restrictions=...
+mapsync: http://127.0.0.1:端口/
+```
+
+出现 `EXCEPTION` 说明某一项反射失败，其它项不受影响。
+
+---
+
+## 实现原理
+
+- **加载**：BepInEx 5 通过 `winhttp.dll` 注入，插件挂在常驻 GameObject 上；
+- **数值**：全部通过反射写入运行时对象，不修改 `.assets`；
+- **惯性甩动**：Harmony 后置补丁挂在 `AnimeBodyPhysics.SwingBreast(...)`，在游戏算完后叠加，由游戏自己应用，衣物/布料全部同步；
+- **服装槽**：数据列表补齐 + 克隆 HUD 格子 + 克隆面板格子（第二行容器）；
+- **头像窗口**：按渲染纹理 `CielFaceCam` 反查 `RawImage`，改 `RectTransform` 与相机参数；
+- **点击穿脱**：Harmony 补丁在 `InventoryDialogController.OnSlotClicked` 之后调用 `UseSelectedSlot()`；
+- **地图同步**：从 `ChunkSpawnResolver` / `ChunkManager` 读真实结果，走回环 TcpListener 提供给浏览器。
+
+### 为什么"根部"很难动
+
+每侧胸只有两根兄弟骨：
+
+```text
+c_breast_01.l  ← 父 c_spine_02_bend.x，无子骨
+c_breast_02.l  ← 父 c_spine_02_bend.x，子骨 c_breast_02.l_end
+```
+
+- 旋转只带动远端（乳头区域）；
+- 整块胸的"整体晃动"是靠**骨骼位移**实现；
+- 靠近胸口的顶点权重偏向脊椎，位移过大会被拉长——模型限制。
+
+---
+
+## 已知限制
+
+- 仅支持 64 位 Mono 版；
+- 游戏大版本更新后字段/方法名变化会让对应功能失效（日志记 `EXCEPTION`，游戏不受影响）；
+- **服装槽扩容是实验性功能**：依赖 prefab 结构，UI 布局是手工摆放的，增加过多可能排版不佳；
+- 横向甩动受两根胸骨限制，位移过大会拉长网格；
+- 头像窗口的取景依赖 `PlayerFaceCam` 与 `CielFaceCam` 渲染纹理，若游戏改结构会失效；
+- **地图查看器复现的是确定性基础布局**，POI 位置随行走路径漂移属正常现象（见"地图不是纯函数"）；
+- **地图同步**依赖回环端口，极少数杀软可能对"游戏进程监听端口"误报（只绑 127.0.0.1，风险很低）；
+- 与 ReShade（`dxgi.dll` 代理）共存无冲突，已实测；
+- 不联网、不写存档、不读注册表（仅地图同步会在 127.0.0.1 回环监听）。
+
+---
+
+## 卸载
+
+删除以下四项即可完全还原：
+
+```text
+winhttp.dll
+doorstop_config.ini
+.doorstop_version
+BepInEx/
+```
+
+卸载后数值回到原版，**已生成在存档里的物品/耐久不会回滚**。地图查看器（`map-viewer/`）是独立网页，可单独保留。
+
+---
+
 ## 版本记录
 
 | 版本 | 内容 |
 |---|---|
 | 1.0.0 | 速度 / 稀有度 / 物品池 |
-| 1.2.0 | 磨损、耐久、垃圾桶 |
-| 1.4.0 | 体力、身体物理 |
-| 1.5.0 | 横向惯性补丁、左右随机、弹簧模式 |
-| 1.6.0 | 服装槽扩容、头像窗口调整、面板点击穿脱 |
+| 1.2.0 | 服装磨损、道具耐久、垃圾桶数量 |
+| 1.4.0 | 体力；身体物理（幅度、阻尼、频率、sway、不对称、回弹、随机） |
+| 1.5.0 | 横向惯性甩动（Harmony）、左右随机、步态弹跳开关、弹簧模式（Spring/Simple）、完整中文注释 |
+| 1.6.0 | 服装槽扩容（数据 + HUD + 面板第二行）、头像窗口移位/缩放/退远/加宽/宽高比、I 面板双击聚焦/穿脱；修复物理参数判定遗漏与弹簧首帧爆冲 |
 | 1.6.1 | 修复 `Enabled=false` 未关闭补丁的问题 |
 | **1.7.0** | 清理游戏内调试输出（保留基础信息叠加层 + `Z:` 地块行）；内置地图种子查看器与真实地块贴图；**新增地图实时同步**（回环动态端口 + 增量 JSON + 自动开浏览器，零配置/零系统改动）；新增 **Classic 限制**开关与干旱模拟；同步数据源改为实际生成的区块；文档补齐生成算法、默认值、特殊建筑间距、POI 干旱补偿、等级限制与同步协议 |
 
@@ -550,8 +689,8 @@ T / Subway 额外有 Half 池：`Residential_2(Half) 100`、`Residential_3(Half)
 
 | 组件 | 许可 |
 |---|---|
-| BepInEx 5.4.23.6 | LGPL-2.1 |
-| PETweaks | 附源码（`source/`） |
+| BepInEx 5.4.23.6 | LGPL-2.1 · <https://github.com/BepInEx/BepInEx> |
+| PETweaks | 本包内附源码（`source/`），可用 `dotnet build -c Release` 自行编译核对 |
 | 地图贴图 | 来自游戏资源，仅用于本地查看器 |
 
 ---
