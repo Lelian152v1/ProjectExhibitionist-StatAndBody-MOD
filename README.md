@@ -44,6 +44,9 @@
 | 界面 | **新增**：角色头像窗口移位 / 缩放 / 退远 / 加宽 / 改宽高比 |
 | 操作 | **新增**：I 键面板里双击服装格直接聚焦/穿脱 |
 
+Mod版胸部物理与原版对比：  
+<img width="384" height="360" alt="MOD效果 00_00_00-00_00_06" src="https://github.com/user-attachments/assets/5d443858-71e7-44f4-bbe0-9b280b626886" /><img width="376" height="360" alt="原版 00_00_00-00_00_30" src="https://github.com/user-attachments/assets/40180ab3-39f3-4762-bd2e-9cfed8def1fa" />
+
 ---
 
 ## 包内容
