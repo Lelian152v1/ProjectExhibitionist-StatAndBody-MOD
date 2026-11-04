@@ -26,6 +26,26 @@
 
 ---
 
+## 这是什么
+
+一个 BepInEx 插件，在游戏运行时修改内存里的数值。**只改内存**：不写游戏资源、不动存档结构、不联网。
+
+删掉插件（或 `Enabled = false`）立即恢复原版。
+
+| 模块 | 内容 |
+|---|---|
+| 移动 | 走 / 跑 / 冲刺 / 蹲 速度倍率 |
+| 掉落 | 稀有度权重、物品池权重、垃圾桶出货数量 |
+| 装备 | 服装磨损、道具耐久 |
+| 体力 | 上限、恢复速度、冲刺/跳跃/翻滚消耗 |
+| 身体物理 | 胸/臀弹簧参数、左右随机、步态弹跳开关 |
+| 惯性 | 转身时胸部的横向甩动（Harmony 补丁，走游戏自己的应用通道） |
+| 服装槽 | **新增**：扩容服装槽（数据 + HUD + 面板 UI 一起扩） |
+| 界面 | **新增**：角色头像窗口移位 / 缩放 / 退远 / 加宽 / 改宽高比 |
+| 操作 | **新增**：I 键面板里双击服装格直接聚焦/穿脱 |
+
+---
+
 ## 包内容
 
 ```
@@ -77,13 +97,13 @@ PETweaks v1.7.0 loaded (persistent runner attached)
 
 配置文件：`BepInEx/config/com.dsh.petweaks.cfg`，改完**重启游戏**生效。
 
-### `[1. General]`
+### `[1. General]`总开关
 
 | 键 | 默认 | 说明 |
 |---|---|---|
 | `Enabled` | true | 总开关；false 时所有功能（含 Harmony 补丁）都不生效 |
 
-### `[2. Speed]`
+### `[2. Speed]`速度
 
 | 键 | 原版值 | 默认倍率 |
 |---|---|---|
@@ -92,7 +112,7 @@ PETweaks v1.7.0 loaded (persistent runner attached)
 | `SprintMultiplier` | 6 | 1.5 |
 | `CrouchMultiplier` | 2 | 1 |
 
-### `[3. Loot / Rarity]`
+### `[3. Loot / Rarity]`各稀有度出率比
 
 | 键 | 原版值 | 默认 |
 |---|---|---|
@@ -109,7 +129,7 @@ PETweaks v1.7.0 loaded (persistent runner attached)
 |---|---|---|
 | `WeightMultiplier` | 1 | 物品池权重等比缩放，不改相对比例 |
 
-### `[7. Wear]`
+### `[7. Wear]`服装/道具磨损
 
 | 键 | 原版值 | 默认 |
 |---|---|---|
@@ -117,14 +137,14 @@ PETweaks v1.7.0 loaded (persistent runner attached)
 | `ItemDurabilityMultiplier` | `maxDurability` = 100 | 1 |
 | `UnlimitedWear` | — | false |
 
-### `[8. Trash]`
+### `[8. Trash]`单个垃圾桶产出物品数
 
 | 键 | 原版值 | 默认 |
 |---|---|---|
 | `MinItems` | 1 | 1 |
 | `MaxItems` | 2 | 2 |
 
-### `[9. Stamina]`
+### `[9. Stamina]`体力消耗
 
 | 键 | 原版值 | 默认倍率 |
 |---|---|---|
@@ -135,9 +155,9 @@ PETweaks v1.7.0 loaded (persistent runner attached)
 | `RollCostMultiplier` | 25 | 1 |
 | `IgnoreConsumption` | — | false |
 
-### `[10. Body Physics]`
+### `[10. Body Physics]`身体物理（胸和臀）
 
-游戏自带弹簧（Anime 风格）：
+游戏自带弹簧（替换Anime 风格）：
 
 | 键 | 默认 | 说明 |
 |---|---|---|
@@ -159,7 +179,7 @@ PETweaks v1.7.0 loaded (persistent runner attached)
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `JiggleMode` | Spring | Spring = 物理弹簧 / Simple = 旧版角度映射 |
+| `JiggleMode` | Spring | Spring = 物理弹簧（线加速度+离心力驱动，推荐）；Simple = 旧版角度映射。 |
 | `JiggleStiffness` | 40 | 刚度 k（20~120），越大越紧 |
 | `JiggleDamping` | 8 | 阻尼 c（4~20），越大越快停 |
 | `YawOffsetMeters` | 0.02 | **横向最大位移（米）★最易造成网格拉长** |
@@ -175,9 +195,9 @@ PETweaks v1.7.0 loaded (persistent runner attached)
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `ExtraClothSlots` | 0 | 在原版 6 个基础上额外增加；建议 ≤4 |
+| `ExtraClothSlots` | 0 | 在原版 6 个基础上额外增加 |
 
-实现（三层一起改）：`maxClothSlots` + 补 4 个并行列表 + 克隆 HUD 格子 + 克隆面板格子（第二行容器）。只影响运行时，不写存档、不改 prefab；出问题改回 0 重启即恢复。
+实现（三层一起改）：`maxClothSlots` + 补并行列表 + 克隆 HUD 格子 + 克隆面板格子（第二行容器）。只影响运行时，不写存档、不改 prefab；出问题改回 0 重启即恢复。
 
 ### `[12. HUD]` 角色头像窗口
 
@@ -191,7 +211,7 @@ PETweaks v1.7.0 loaded (persistent runner attached)
 
 **原理**：`PlayerFaceCam` 渲染到 `800×800` 的 `CielFaceCam` 渲染纹理，窗口是显示该纹理的 `RawImage`。位移/缩放改窗口 `RectTransform`；取景改 `offset.z` 与 `fieldOfView`；竖长重建渲染纹理为 `800×(800/aspect)`。
 
-### `[13. QoL]`
+### `[13. QoL]`双击聚焦指定服装
 
 | 键 | 默认 | 说明 |
 |---|---|---|
@@ -199,7 +219,7 @@ PETweaks v1.7.0 loaded (persistent runner attached)
 
 **注意**：衣服是"可交互对象"，双击对非 `WearableItemSO` 服装走 `SelectCloth()`（聚焦）分支——所以双击是让 HUD 聚焦到该件服装，而非直接穿脱，这是原版设计。
 
-### `[14. Map]`
+### `[14. Map]`地图同步
 
 | 键 | 默认 | 说明 |
 |---|---|---|
@@ -231,7 +251,7 @@ Z: City10
 
 ---
 
-## 预设
+## 胸部晃动预设
 
 > 配置文件可能被程序重写，**请以本节为准**。
 
@@ -310,7 +330,7 @@ Z: City10
 
 > 以下全部来自反编译 `Assembly-CSharp.dll` 并在游戏内实测验证（7×7 共 49 格，区块/旋转/地块 **49/49 一致**）。
 
-### 0. 先搞清楚：地图不是纯函数
+### 0. 地图不是纯函数
 
 游戏的地图生成分**两层**：
 
@@ -679,9 +699,9 @@ BepInEx/
 | 1.2.0 | 服装磨损、道具耐久、垃圾桶数量 |
 | 1.4.0 | 体力；身体物理（幅度、阻尼、频率、sway、不对称、回弹、随机） |
 | 1.5.0 | 横向惯性甩动（Harmony）、左右随机、步态弹跳开关、弹簧模式（Spring/Simple）、完整中文注释 |
-| 1.6.0 | 服装槽扩容（数据 + HUD + 面板第二行）、头像窗口移位/缩放/退远/加宽/宽高比、I 面板双击聚焦/穿脱；修复物理参数判定遗漏与弹簧首帧爆冲 |
+| 1.6.0 | 服装槽扩容（数据 + HUD + 面板第二行）<br />头像窗口移位/缩放/退远/加宽/宽高比、I 面板双击聚焦/穿脱；<br />修复物理参数判定遗漏与弹簧首帧爆冲 |
 | 1.6.1 | 修复 `Enabled=false` 未关闭补丁的问题 |
-| **1.7.0** | 清理游戏内调试输出（保留基础信息叠加层 + `Z:` 地块行）；内置地图种子查看器与真实地块贴图；**新增地图实时同步**（回环动态端口 + 增量 JSON + 自动开浏览器，零配置/零系统改动）；新增 **Classic 限制**开关与干旱模拟；同步数据源改为实际生成的区块；文档补齐生成算法、默认值、特殊建筑间距、POI 干旱补偿、等级限制与同步协议 |
+| **1.7.0** | 清理游戏内调试输出（保留基础信息叠加层 + `Z:` 地块行）；<br />内置地图种子查看器与真实地块贴图；<br />**新增地图实时同步**（回环动态端口 + 增量 JSON + 自动开浏览器，零配置/零系统改动）； |
 
 ---
 
