@@ -29,6 +29,10 @@
       <HintPath>D:\Game\A1753\Project Exhibitionist\Project Exhibitionist_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>D:\Game\A1753\Project Exhibitionist\Project Exhibitionist_Data\Managed\UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="UnityEngine.UIModule">
       <HintPath>D:\Game\A1753\Project Exhibitionist\Project Exhibitionist_Data\Managed\UnityEngine.UIModule.dll</HintPath>
       <Private>false</Private>

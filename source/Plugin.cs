@@ -2,6 +2,11 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Threading;
+using System.IO;
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
@@ -12,7 +17,7 @@ using UnityEngine.Rendering;
 
 namespace PETweaks
 {
-    [BepInPlugin("com.dsh.petweaks", "Project Exhibitionist Tweaks", "1.6.0")]
+    [BepInPlugin("com.dsh.petweaks", "Project Exhibitionist Tweaks", "1.7.0")]
     public class Plugin : BaseUnityPlugin
     {
         internal static ConfigEntry<bool>   CfgEnabled;
@@ -59,6 +64,12 @@ namespace PETweaks
         internal static ConfigEntry<float>  FaceCamFovScale;
         internal static ConfigEntry<float>  FaceCamAspect;
         internal static ConfigEntry<string> PanelClothClick;
+        internal static ConfigEntry<bool>   ShowMapSeed;
+        internal static ConfigEntry<bool>   DumpMapData;
+        internal static ConfigEntry<bool>   MapSyncEnabled;
+        internal static ConfigEntry<bool>   MapSyncAutoOpen;
+        internal static ConfigEntry<int>    MapSyncIntervalMs;
+        internal static ConfigEntry<string> MapSyncViewerDir;
         internal static ConfigEntry<bool>   SideRandomize;
         internal static ConfigEntry<float>  SideRandomInterval;
         internal static ConfigEntry<float>  BodyKickRandomMul;
@@ -164,6 +175,20 @@ namespace PETweaks
             FaceCamScale = Config.Bind("12. HUD", "FaceCamScale", 1f,
                 "面部摄像机窗口的缩放倍率，1 = 原始大小，0.8 = 缩小到 80%");
 
+            ShowMapSeed = Config.Bind("14. Map", "ShowMapSeed", true,
+                "在屏幕左上角显示当前地图种子、所在格、街区和区块（类似 MC 的 F3）");
+            DumpMapData = Config.Bind("14. Map", "DumpMapData", false,
+                "进图后把真实的区块/街区/地块权重导出到日志，供地图可视化使用");
+
+            MapSyncEnabled = Config.Bind("14. Map", "MapSyncEnabled", true,
+                "启用地图实时同步：在 127.0.0.1 上开一个只限本机的临时端口，把游戏实际生成的区块提供给查看器（不需要管理员，不改系统设置）。");
+            MapSyncAutoOpen = Config.Bind("14. Map", "MapSyncAutoOpen", true,
+                "进图后自动用默认浏览器打开查看器页面。");
+            MapSyncIntervalMs = Config.Bind("14. Map", "MapSyncIntervalMs", 500,
+                "同步轮询间隔（毫秒）。500 = 每 0.5 秒检查一次新提交的区块。");
+            MapSyncViewerDir = Config.Bind("14. Map", "MapSyncViewerDir", "",
+                "查看器目录（含 index.html）。留空 = 自动在插件目录的 PETweaks/map-viewer 或 map-viewer 下查找。");
+
             PanelClothClick = Config.Bind("13. QoL", "PanelClothClick", "Double",
                 "I 键面板里点击服装格的行为：Off = 只选中，Double = 双击穿脱，Single = 单击穿脱");
 
@@ -193,8 +218,10 @@ namespace PETweaks
             try { YawPatch.Install(); }
             catch (Exception e) { Logger.LogWarning("yaw patch install failed: " + e.Message); }
 
-            Logger.LogInfo("PETweaks v1.6.0 loaded (persistent runner attached)");
+            Logger.LogInfo("PETweaks v1.7.0 loaded (persistent runner attached)");
         }
+
+        private void OnApplicationQuit() { try { MapSync.Shutdown(); } catch { } }
 
         internal static void Apply(string reason)
         {
@@ -232,14 +259,21 @@ namespace PETweaks
 
         private void Update()
         {
-            try { Inertia.Tick(Plugin.InertiaKick.Value); } catch { }
+            try { if (Plugin.CfgEnabled.Value) Inertia.Tick(Plugin.InertiaKick.Value); } catch { }
             try { ClothSlots.Tick(Plugin.ExtraClothSlots.Value); } catch { }
             try { FaceCam.Tick(Plugin.FaceCamOffsetY.Value); } catch { }
-            try { SideRandom.Tick(Plugin.SideRandomInterval.Value, Plugin.SideRandomize.Value, Plugin.BodyAsymmetryMul.Value); } catch { }
+            try { MapInfo.Tick(); } catch { }
+            try { MapSync.Tick(); } catch { }
+            try { SideRandom.Tick(Plugin.SideRandomInterval.Value, Plugin.SideRandomize.Value && Plugin.CfgEnabled.Value, Plugin.BodyAsymmetryMul.Value); } catch { }
 
             if (Time.unscaledTime < _nextApply) return;
             _nextApply = Time.unscaledTime + 5f;
             try { Plugin.Apply("tick"); } catch { }
+        }
+
+        private void OnGUI()
+        {
+            try { MapInfo.Draw(); } catch { }
         }
     }
 
@@ -990,6 +1024,7 @@ namespace PETweaks
         private static void Postfix(object __0, object __instance)
         {
             if (!_installed || __0 == null || __instance == null) return;
+            if (!Plugin.CfgEnabled.Value) return;   // 总开关关闭时不注入任何惯性
 
             bool springMode = !string.Equals(Plugin.JiggleMode.Value, "Simple", StringComparison.OrdinalIgnoreCase);
             if (springMode && Plugin.JiggleStiffness.Value <= 0f) return;
@@ -1129,9 +1164,12 @@ namespace PETweaks
     {
         private static bool _applied, _failed;
         private static float _next;
+        private static float _nextPosLog;
+        private static float _nextGridDump;
 
         internal static void Tick(int extra)
         {
+            if (!Plugin.CfgEnabled.Value) return;
             if (extra <= 0 || _applied || _failed) return;
             if (Time.unscaledTime < _next) return;
             _next = Time.unscaledTime + 2f;
@@ -1378,9 +1416,12 @@ namespace PETweaks
     {
         private static bool _done;
         private static float _next;
+        private static float _nextPosLog;
+        private static float _nextGridDump;
 
         internal static void Tick(float offsetY)
         {
+            if (!Plugin.CfgEnabled.Value) return;
             if (_done) return;
             if (Time.unscaledTime < _next) return;
             _next = Time.unscaledTime + 3f;
@@ -1524,13 +1565,14 @@ namespace PETweaks
 
         private static void Prefix(object __instance)
         {
-            try { _prev = _selectedField?.GetValue(__instance); } catch { _prev = null; }
+            try { _prev = Plugin.CfgEnabled.Value ? _selectedField?.GetValue(__instance) : null; } catch { _prev = null; }
         }
 
         private static void Postfix(object __instance, object slot)
         {
             try
             {
+                if (!Plugin.CfgEnabled.Value) return;
                 if (slot == null || _use == null) return;
                 Type st = slot.GetType();
                 object kind = st.GetProperty("Kind")?.GetValue(slot);
@@ -1542,6 +1584,1086 @@ namespace PETweaks
                 _use.Invoke(__instance, null);
             }
             catch (Exception e) { Plugin.Log("clothclick EXCEPTION " + e.GetType().Name + ": " + e.Message); }
+        }
+    }
+
+
+    /// <summary>显示地图种子/坐标/街区，并把真实地图参数导出到日志。</summary>
+    internal static class MapInfo
+    {
+        private static Type _cmType, _resolverType;
+        private static object _cm, _resolver;
+        private static Component _cmComp;
+        private static float _cellSize = 60f;
+        private static int _seed;
+        private static bool _ready, _dumped;
+        private static float _next;
+        private static float _nextPosLog;
+        private static float _nextGridDump;
+        private static string _overlay = "";
+        private static GUIStyle _style, _box;
+
+        internal static void Tick()
+        {
+            if (!Plugin.ShowMapSeed.Value && !Plugin.DumpMapData.Value) return;
+            if (Time.unscaledTime < _next) return;
+            _next = Time.unscaledTime + 1.5f;
+
+            try
+            {
+                // 场景切换 / 新开一局时 ChunkManager 会被销毁重建，这里检测并重置
+                if (_cmComp == null)
+                {
+                    _ready = false;
+                    _cm = null;
+                    _resolver = null;
+                    _dumped = false;
+                }
+
+                if (!_ready) TryInit();
+                if (!_ready) return;
+
+                // 每次刷新都重新读一次种子（不同局种子会变）
+                try
+                {
+                    MethodInfo trySeed = _cmType.GetMethod("TryGetSessionSeed", BindingFlags.Public | BindingFlags.Instance);
+                    if (trySeed != null)
+                    {
+                        object[] args = { 0 };
+                        if ((bool)trySeed.Invoke(_cm, args))
+                        {
+                            int s = (int)args[0];
+                            if (s != 0 && s != _seed)
+                            {
+                                _seed = s;
+                                Plugin.Log($"mapinfo: seed -> {_seed}");
+                            }
+                        }
+                    }
+                }
+                catch { }
+
+                // 解析器也可能在换局时被重建
+                try
+                {
+                    FieldInfo resF = _cmType.GetField("_spawnResolver", BindingFlags.NonPublic | BindingFlags.Instance);
+                    object r2 = resF?.GetValue(_cm);
+                    if (r2 != null && !ReferenceEquals(r2, _resolver))
+                    {
+                        _resolver = r2;
+                        _resolverType = r2.GetType();
+                    }
+                }
+                catch { }
+
+                _overlay = BuildOverlay();
+                if (Plugin.DumpMapData.Value && !_dumped) { _dumped = true; Dump(); }
+            }
+            catch (Exception e) { Plugin.Log("mapinfo EXCEPTION " + e.GetType().Name + ": " + e.Message); }
+        }
+
+        private static void TryInit()
+        {
+            if (_cmType == null) _cmType = Tweaks.FindType("ChunkManager");
+            if (_cmType == null) return;
+            if (_cm == null)
+            {
+                _cmComp = UnityEngine.Object.FindObjectOfType(_cmType) as Component;
+                if (_cmComp == null) return;
+                _cm = _cmComp;
+            }
+
+            FieldInfo cellF = _cmType.GetField("cellSize", BindingFlags.NonPublic | BindingFlags.Instance);
+            if (cellF != null) _cellSize = (float)cellF.GetValue(_cm);
+            if (_cellSize <= 1f) _cellSize = 60f;
+
+            FieldInfo resF = _cmType.GetField("_spawnResolver", BindingFlags.NonPublic | BindingFlags.Instance);
+            _resolver = resF?.GetValue(_cm);
+            if (_resolver == null) { _cm = null; return; }
+            _resolverType = _resolver.GetType();
+
+            try
+            {
+                PropertyInfo to = _resolverType.GetProperty("TravelOffset");
+                if (to != null) _travel = (Vector2Int)to.GetValue(_resolver, null);
+            }
+            catch { }
+
+            MethodInfo trySeed = _cmType.GetMethod("TryGetSessionSeed", BindingFlags.Public | BindingFlags.Instance);
+            if (trySeed != null)
+            {
+                object[] args = { 0 };
+                if ((bool)trySeed.Invoke(_cm, args)) _seed = (int)args[0];
+            }
+            _ready = true;
+            float bootCs = -1f;
+            try
+            {
+                Type gs = Tweaks.FindType("GameSystemsBootstrapper");
+                object gsi = gs?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
+                object v = gs?.GetProperty("CellSize")?.GetValue(gsi);
+                if (v is float f) bootCs = f;
+            }
+            catch { }
+            Plugin.Log($"mapinfo: seed={_seed} cellSize={_cellSize} bootstrapperCellSize={bootCs} travel=({_travel.x},{_travel.y}) catalog={_cmType.GetProperty("ActiveMapCatalogResource")?.GetValue(_cm)}");
+
+        }
+
+        private static Vector2Int PlayerCell()
+        {
+            Type invT = Tweaks.FindType("Features.Inventory.PlayerInventoryManager");
+            object inv = invT?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
+            Component c = inv as Component;
+            if (c == null) return new Vector2Int(int.MinValue, int.MinValue);
+            Vector3 pos = c.transform.position;
+            try
+            {
+                MethodInfo w2c = _cmType.GetMethod("WorldToCell", BindingFlags.Public | BindingFlags.Instance);
+                if (w2c != null) return (Vector2Int)w2c.Invoke(_cm, new object[] { pos });
+            }
+            catch { }
+            Vector3 lp = LogicalPos(pos);
+            return new Vector2Int(Mathf.RoundToInt(lp.x / _cellSize), Mathf.RoundToInt(lp.z / _cellSize));
+        }
+
+        private static Vector2Int _travel = Vector2Int.zero;
+        private static PropertyInfo _offsetProp;
+
+        private static float ReadHudDistance(float fallback)
+        {
+            try
+            {
+                if (_dtType == null) _dtType = Tweaks.FindType("ExhibitionistDemo.UI.DistanceTracker");
+                if (_dtType == null) return fallback;
+                if (_dt == null) _dt = UnityEngine.Object.FindObjectOfType(_dtType);
+                if (_dt == null) return fallback;
+                MethodInfo m2 = _dtType.GetMethod("GetDistance2D", BindingFlags.Public | BindingFlags.Instance);
+                if (m2 != null) return (float)m2.Invoke(_dt, null);
+                MethodInfo m1 = _dtType.GetMethod("GetDistance", BindingFlags.Public | BindingFlags.Instance);
+                if (m1 != null) return (float)m1.Invoke(_dt, null);
+            }
+            catch { }
+            return fallback;
+        }
+
+        private static Type _dtType;
+        private static object _dt;
+
+        private static Vector3 LogicalPos(Vector3 unityPos)
+        {
+            if (_offsetProp == null)
+            {
+                Type wo = Tweaks.FindType("Features.RenderingPrecision.WorldOrigin");
+                if (wo != null) _offsetProp = wo.GetProperty("Offset", BindingFlags.Public | BindingFlags.Static);
+            }
+            if (_offsetProp == null) return unityPos;
+            return unityPos + (Vector3)_offsetProp.GetValue(null);
+        }
+
+        private static string BuildOverlay()
+        {
+            Vector2Int cell = PlayerCell();
+            if (cell.x == int.MinValue) return $"SEED {_seed}    (等待角色生成)";
+
+            string posText = "";
+            Type invT2 = Tweaks.FindType("Features.Inventory.PlayerInventoryManager");
+            object inv2 = invT2?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
+            if (inv2 is Component cc)
+            {
+                Vector3 wp = LogicalPos(cc.transform.position);
+                float originDist = Mathf.Sqrt(wp.x * wp.x + wp.z * wp.z);
+                float hudDist = ReadHudDistance(originDist);
+                posText = $"\nPOS ({wp.x:0.0}, {wp.z:0.0})  HUD {hudDist:0} m  (原点 {originDist:0} m)";
+            }
+
+            string biome = "?", chunk = "?", size = "", rot = "";
+            bool subway = false;
+            try
+            {
+                MethodInfo biomeM = _resolverType.GetMethod("GetBiomeForCell");
+                object b = biomeM?.Invoke(_resolver, new object[] { cell });
+                if (b != null) biome = (string)b.GetType().GetField("biomeName")?.GetValue(b) ?? "?";
+
+                MethodInfo resolve = _resolverType.GetMethod("Resolve", new[] { typeof(Vector2Int) });
+                object entry = resolve?.Invoke(_resolver, new object[] { cell });
+                if (entry != null)
+                {
+                    Type et = entry.GetType();
+                    object cd = et.GetField("chunkData")?.GetValue(entry);
+                    if (cd != null)
+                    {
+                        chunk = ((UnityEngine.Object)cd).name;
+                        object gs = cd.GetType().GetField("gridSize")?.GetValue(cd);
+                        if (gs is Vector2Int v) size = $" {v.x}x{v.y}";
+                        object sw = cd.GetType().GetField("containsSubway")?.GetValue(cd);
+                        subway = sw is bool b2 && b2;
+                    }
+                    object r = et.GetField("rotation")?.GetValue(entry);
+                    if (r is int ri) rot = $" rot{ri * 90}°";
+                }
+            }
+            catch (Exception e) { Plugin.Log("mapinfo cell EX " + e.Message); }
+
+            string zoneText = "";
+            try
+            {
+                MethodInfo rz = _resolverType.GetMethod("Resolve", new[] { typeof(Vector2Int) });
+                object ez = rz?.Invoke(_resolver, new object[] { cell });
+                if (ez != null)
+                {
+                    Type et = ez.GetType();
+                    object cd = et.GetField("chunkData")?.GetValue(ez);
+                    int[] zi = et.GetField("zoneIndices")?.GetValue(ez) as int[];
+                    if (cd != null && zi != null)
+                    {
+                        var list = cd.GetType().GetField("availableZones")?.GetValue(cd) as System.Collections.IList;
+                        var ns = new List<string>();
+                        foreach (int ix in zi)
+                            ns.Add((list != null && ix >= 0 && ix < list.Count && list[ix] != null)
+                                ? ((UnityEngine.Object)list[ix]).name : "-");
+                        zoneText = "\nZ: " + string.Join(" / ", ns);
+                    }
+                }
+            }
+            catch { }
+
+            return $"SEED {_seed}\nCELL ({cell.x}, {cell.y})  [{biome}]\n{chunk}{size}{rot}{(subway ? "  [地铁]" : "")}{posText}{zoneText}";
+        }
+
+        private static void Dump()
+        {
+            try
+            {
+                FieldInfo chunksF = _cmType.GetField("availableChunks", BindingFlags.NonPublic | BindingFlags.Instance);
+                var chunks = chunksF?.GetValue(_cm) as Array;
+                Plugin.Log($"mapdata: seed={_seed} cellSize={_cellSize} chunks={chunks?.Length ?? 0}");
+                if (chunks != null)
+                {
+                    foreach (object c in chunks)
+                    {
+                        if (c == null) continue;
+                        Type ct = c.GetType();
+                        object gs = ct.GetField("gridSize")?.GetValue(c);
+                        string sz = gs is Vector2Int v ? $"{v.x}x{v.y}" : "?";
+                        object w = ct.GetField("spawnWeight")?.GetValue(c);
+                        object sub = ct.GetField("containsSubway")?.GetValue(c);
+                        object allowed = ct.GetField("allowedBiomes")?.GetValue(c);
+                        int allowedN = (allowed as System.Collections.IList)?.Count ?? 0;
+                        Plugin.Log($"mapdata chunk | {((UnityEngine.Object)c).name} | {sz} | w={w} | subway={sub} | biomes={(allowedN == 0 ? "any" : allowedN.ToString())}");
+
+                        // 区块 prefab 里的 Base* 子物体（决定槽位实际位置）
+                        try
+                        {
+                            object tpl0 = ct.GetField("template")?.GetValue(c);
+                            object prefab = tpl0?.GetType().GetField("chunkPrefab")?.GetValue(tpl0);
+                            GameObject pg = prefab as GameObject;
+                            if (pg != null)
+                            {
+                                var trs = pg.GetComponentsInChildren<Transform>(true);
+                                var parts = new List<string>();
+                                foreach (Transform tr in trs)
+                                {
+                                    if (tr == pg.transform) continue;
+                                    if (tr.name.IndexOf("Base", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                                    Vector3 lp = tr.localPosition;
+                                    Vector3 le = tr.localEulerAngles;
+                                    parts.Add($"{tr.name}@({lp.x:0.#},{lp.y:0.#},{lp.z:0.#})r{le.y:0}");
+                                }
+                                Plugin.Log($"mapdata   bases | {((UnityEngine.Object)c).name} | {string.Join(", ", parts)}");
+                            }
+                        }
+                        catch (Exception ex) { Plugin.Log("mapdata bases EX " + ex.Message); }
+
+                        // 槽位顺序（zoneSlots）
+                        try
+                        {
+                            object tpl = ct.GetField("template")?.GetValue(c);
+                            var slots = tpl?.GetType().GetField("zoneSlots")?.GetValue(tpl) as System.Collections.IList;
+                            if (slots != null)
+                            {
+                                var parts = new List<string>();
+                                foreach (object s2 in slots)
+                                {
+                                    if (s2 == null) { parts.Add("?"); continue; }
+                                    Type st2 = s2.GetType();
+                                    object occ2 = st2.GetField("occupancy")?.GetValue(s2);
+                                    object pos2 = st2.GetField("gridPosition")?.GetValue(s2);
+                                    object rot2 = st2.GetField("rotation")?.GetValue(s2);
+                                    parts.Add($"{occ2}@{pos2}r{rot2}");
+                                }
+                                Plugin.Log($"mapdata   slots | {((UnityEngine.Object)c).name} | {string.Join(", ", parts)}");
+                            }
+                        }
+                        catch (Exception ex) { Plugin.Log("mapdata slots EX " + ex.Message); }
+
+                        var czones = ct.GetField("availableZones")?.GetValue(c) as System.Collections.IList;
+                        if (czones != null && czones.Count > 0)
+                        {
+                            foreach (object cz in czones)
+                            {
+                                if (cz == null) continue;
+                                Type zt2 = cz.GetType();
+                                object zw2 = zt2.GetField("spawnWeight")?.GetValue(cz);
+                                object occ2 = zt2.GetField("occupancy")?.GetValue(cz);
+                                object tcs2 = zt2.GetField("targetChunkSize")?.GetValue(cz);
+                                Plugin.Log($"mapdata   chunkzone | {((UnityEngine.Object)cz).name} | w={zw2} | {tcs2}/{occ2} | {PoiInfo(cz)}");
+                            }
+                        }
+                    }
+                }
+
+                FieldInfo biomeF = _cmType.GetField("biomeManager", BindingFlags.NonPublic | BindingFlags.Instance);
+                object bm = biomeF?.GetValue(_cm);
+                var biomes = bm?.GetType().GetField("biomes")?.GetValue(bm) as System.Collections.IList;
+                Plugin.Log($"mapdata: biomes={biomes?.Count ?? 0}");
+                if (biomes != null)
+                {
+                    foreach (object b in biomes)
+                    {
+                        if (b == null) continue;
+                        Type bt = b.GetType();
+                        string name = bt.GetField("biomeName")?.GetValue(b) as string;
+                        object w = bt.GetField("baseSpawnWeight")?.GetValue(b);
+                        object fb = bt.GetField("fallbackBiome")?.GetValue(b);
+                        string fbName = fb != null ? ((UnityEngine.Object)fb).name : "null";
+                        var ovList = bt.GetField("chunkWeightOverrides")?.GetValue(b) as System.Collections.IList;
+                        Plugin.Log($"mapdata biome | {name} | baseWeight={w} | fallback={fbName} | overrides={ovList?.Count ?? 0}");
+
+                        var zones = bt.GetField("availableZones")?.GetValue(b) as System.Collections.IList;
+                        if (zones != null)
+                        {
+                            foreach (object z in zones)
+                            {
+                                if (z == null) continue;
+                                Type zt = z.GetType();
+                                string zn = zt.GetField("zoneName")?.GetValue(z) as string;
+                                object zw = zt.GetField("spawnWeight")?.GetValue(z);
+                                object occ = zt.GetField("occupancy")?.GetValue(z);
+                                object tcs = zt.GetField("targetChunkSize")?.GetValue(z);
+                                Plugin.Log($"mapdata   zone | {zn} | w={zw} | {tcs}/{occ} | {PoiInfo(z)}");
+                            }
+                        }
+                        var ov = bt.GetField("chunkWeightOverrides")?.GetValue(b) as System.Collections.IList;
+                        if (ov != null)
+                        {
+                            foreach (object o in ov)
+                            {
+                                if (o == null) continue;
+                                Type ot = o.GetType();
+                                object cd = ot.GetField("chunk")?.GetValue(o);
+                                object mul = ot.GetField("multiplier")?.GetValue(o);
+                                Plugin.Log($"mapdata   override | {(cd != null ? ((UnityEngine.Object)cd).name : "?")} x{mul}");
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception e) { Plugin.Log("mapdata EXCEPTION " + e.GetType().Name + ": " + e.Message); }
+        }
+
+        private static Type _policyType;
+
+        private static string PoiInfo(object zone)
+        {
+            try
+            {
+                if (_policyType == null) _policyType = Tweaks.FindType("ProceduralZonePolicy");
+                if (_policyType == null) return "?";
+                object special = _policyType.GetMethod("IsSpecialZone")?.Invoke(null, new[] { zone });
+                object kind = _policyType.GetMethod("GetPoiKind")?.Invoke(null, new[] { zone });
+                bool isSpecial = special is bool b && b;
+                string k = kind?.ToString() ?? "None";
+                if (!isSpecial && k == "None") return "-";
+                return $"special={(isSpecial ? 1 : 0)} poi={k}";
+            }
+            catch { return "?"; }
+        }
+
+        internal static void Draw()
+        {
+            if (!Plugin.ShowMapSeed.Value || string.IsNullOrEmpty(_overlay)) return;
+            if (_box == null)
+            {
+                _box = new GUIStyle(GUI.skin.box) { alignment = TextAnchor.UpperLeft, fontSize = 14 };
+                _style = new GUIStyle(GUI.skin.label) { fontSize = 15, richText = true, alignment = TextAnchor.UpperLeft, wordWrap = false };
+                _style.normal.textColor = Color.white;
+            }
+            // 按文字实际大小包住内容
+            var content = new GUIContent(_overlay);
+            Vector2 size = _style.CalcSize(content);
+            var rect = new Rect(10f, 10f, size.x + 18f, size.y + 12f);
+            GUI.Box(rect, GUIContent.none, _box);
+            GUI.Label(new Rect(rect.x + 9f, rect.y + 6f, size.x, size.y), _overlay, _style);
+        }
+    }
+
+
+    /// <summary>临时探针：记录游戏内部每次地块抽取的哈希与结果。</summary>
+    internal static class ZoneProbe
+    {
+        internal static bool Active;
+        internal static int CellX, CellY;
+        private static bool _installed;
+
+        internal static void Install()
+        {
+            if (_installed) return;
+            Type rt = Tweaks.FindType("ChunkSpawnResolver");
+            if (rt == null) { Plugin.Log("zoneprobe: resolver not found"); return; }
+
+            MethodInfo mi = null;
+            foreach (MethodInfo m in rt.GetMethods(BindingFlags.NonPublic | BindingFlags.Static))
+            {
+                if (m.Name != "SelectZoneIndex") continue;
+                ParameterInfo[] ps = m.GetParameters();
+                if (ps.Length == 6 && ps[2].ParameterType == typeof(uint)) { mi = m; break; }
+            }
+            if (mi == null) { Plugin.Log("zoneprobe: SelectZoneIndex not found"); return; }
+
+            var harmony = new Harmony("com.dsh.petweaks.zoneprobe");
+            harmony.Patch(mi,
+                prefix: new HarmonyMethod(typeof(ZoneProbe).GetMethod(nameof(Prefix), BindingFlags.NonPublic | BindingFlags.Static)),
+                postfix: new HarmonyMethod(typeof(ZoneProbe).GetMethod(nameof(Postfix), BindingFlags.NonPublic | BindingFlags.Static)));
+            _installed = true;
+            Plugin.Log("zoneprobe installed");
+        }
+
+        private static uint _h;
+        private static void Prefix(object[] __args)
+        {
+            if (!Active) return;
+            try { _h = (uint)__args[2]; } catch { }
+        }
+
+        private static void Postfix(ref int __result)
+        {
+            if (!Active) return;
+            try { Plugin.Log($"zoneprobe cell=({CellX},{CellY}) h={_h} h%4={_h % 4} h2f={( _h & 0xFFFFFF) / 16777216f:0.000000} chosenIndex={__result}"); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// 地图同步：把游戏实际生成的区块通过本地回环 HTTP 服务提供给查看器。
+    /// 只监听 127.0.0.1 的动态端口：不需要管理员、不写注册表、不改防火墙。
+    /// </summary>
+    internal static class MapSync
+    {
+        private sealed class CellRec
+        {
+            public int X, Y, Gw, Gh, Rot;
+            public string Chunk = "";
+            public string[] Zones = Array.Empty<string>();
+        }
+
+        private static bool _initTried, _ready;
+        private static Type _cmType;
+        private static object _cm;
+        private static Component _cmComp;
+        private static FieldInfo _planField;
+        private static PropertyInfo _validProp;
+        private static FieldInfo _chunkF, _rotF, _zonesF;
+        private static FieldInfo _spawnedField, _ciChunkF, _ciRotF, _ciZonesF;
+        private static int _seed;
+        private static int _px, _py;
+        private static bool _hasPlayer;
+        private static float _nextPoll;
+        private static bool _autoOpened;
+
+        private static readonly object _lock = new object();
+        private static readonly List<CellRec> _ordered = new List<CellRec>();
+        private static readonly Dictionary<long, int> _index = new Dictionary<long, int>();
+        private static readonly Dictionary<int, List<int>> _verDelta = new Dictionary<int, List<int>>();
+        private static int _version;
+        private static int _trimBefore = 1;
+
+        private static TcpListener _listener;
+        private static Thread _thread;
+        private static int _port;
+        private static string _rootDir;
+
+        private static long Key(int x, int y) { return ((long)x << 32) | (uint)y; }
+
+        internal static void Tick()
+        {
+            if (!Plugin.MapSyncEnabled.Value) return;
+            try
+            {
+
+                if (!_initTried) { _initTried = true; TryInit(); }
+                if (!_ready) return;
+                if (Time.unscaledTime < _nextPoll) return;
+                float iv = Mathf.Max(0.2f, Plugin.MapSyncIntervalMs.Value / 1000f);
+                _nextPoll = Time.unscaledTime + iv;
+
+                Poll();
+
+                if (!_autoOpened && _seed != 0 && Plugin.MapSyncAutoOpen.Value && _rootDir != null)
+                {
+                    _autoOpened = true;
+                    Open();
+                }
+            }
+            catch (Exception e) { Plugin.Log("mapsync tick EX " + e.Message); }
+        }
+
+        private static void TryInit()
+        {
+            try
+            {
+                _cmType = Tweaks.FindType("ChunkManager");
+                if (_cmType == null) { Plugin.Log("mapsync: ChunkManager type not found"); return; }
+                _planField = _cmType.GetField("_committedSpawnPlan", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (_planField == null) { Plugin.Log("mapsync: _committedSpawnPlan not found"); return; }
+                Type entryType = _planField.FieldType.GetGenericArguments()[1];
+                _validProp = entryType.GetProperty("IsValid");
+                _chunkF = entryType.GetField("chunkData");
+                _rotF = entryType.GetField("rotation");
+                _zonesF = entryType.GetField("zoneIndices");
+
+                _spawnedField = _cmType.GetField("_spawnedChunks", BindingFlags.NonPublic | BindingFlags.Instance);
+                Type ciType = _spawnedField != null ? _spawnedField.FieldType.GetGenericArguments()[1] : null;
+                if (ciType != null)
+                {
+                    _ciChunkF = ciType.GetField("chunkData");
+                    _ciRotF = ciType.GetField("rotation");
+                    _ciZonesF = ciType.GetField("spawnedZones");
+                }
+
+                _rootDir = FindViewerDir();
+                if (_rootDir == null) Plugin.Log("mapsync: map-viewer dir not found");
+
+                _listener = new TcpListener(IPAddress.Loopback, 0);
+                _listener.Start();
+                _port = ((IPEndPoint)_listener.LocalEndpoint).Port;
+                _thread = new Thread(ServeLoop) { IsBackground = true, Name = "PETweaks-MapSync" };
+                _thread.Start();
+                _ready = true;
+                Plugin.Log("mapsync: http://127.0.0.1:" + _port + "/  viewerDir=" + (_rootDir ?? "null"));
+            }
+            catch (Exception e) { Plugin.Log("mapsync init EX " + e.GetType().Name + ": " + e.Message); }
+        }
+
+        private static string FindViewerDir()
+        {
+            try
+            {
+                string custom = Plugin.MapSyncViewerDir.Value;
+                if (!string.IsNullOrEmpty(custom) && File.Exists(Path.Combine(custom, "index.html"))) return custom;
+                string dir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+                string[] cands =
+                {
+                    Path.Combine(dir, "PETweaks", "map-viewer"),
+                    Path.Combine(dir, "map-viewer"),
+                    Path.GetFullPath(Path.Combine(dir, "..", "..", "map-viewer")),
+                };
+                foreach (string c in cands) if (File.Exists(Path.Combine(c, "index.html"))) return c;
+            }
+            catch { }
+            return null;
+        }
+
+        internal static void Open()
+        {
+            if (!_ready) return;
+            try { Application.OpenURL("http://127.0.0.1:" + _port + "/"); } catch { }
+        }
+
+        private static void Poll()
+        {
+            try
+            {
+                if (_cmComp == null)
+                {
+                    _cm = null;
+                    _cmComp = UnityEngine.Object.FindObjectOfType(_cmType) as Component;
+                    if (_cmComp == null) return;
+                    _cm = _cmComp;
+                }
+                int nowSeed = ReadSeed();
+                if (nowSeed != 0 && nowSeed != _seed)
+                {
+                    _seed = nowSeed;
+                    ResetData();
+                }
+                UpdatePlayer();
+
+                System.Collections.IDictionary plan = _planField.GetValue(_cm) as System.Collections.IDictionary;
+                System.Collections.IDictionary spawned = _spawnedField != null
+                    ? _spawnedField.GetValue(_cm) as System.Collections.IDictionary
+                    : null;
+                if ((plan == null || plan.Count == 0) && (spawned == null || spawned.Count == 0)) return;
+
+                List<CellRec> fresh = new List<CellRec>();
+                List<KeyValuePair<int, CellRec>> updates = new List<KeyValuePair<int, CellRec>>();
+                HashSet<long> seen = new HashSet<long>();
+
+                // 1) 实际生成的区块优先：能拿到"生成时被替换后"的真实地块
+                if (spawned != null)
+                {
+                    foreach (System.Collections.DictionaryEntry de in spawned)
+                    {
+                        if (!(de.Key is Vector2Int scell)) continue;
+                        long k = Key(scell.x, scell.y);
+                        if (!seen.Add(k)) continue;
+                        object planEntry = null;
+                        if (plan != null && plan.Contains(scell)) planEntry = plan[scell];
+                        CellRec rec = ReadSpawned(scell, de.Value, planEntry);
+                        if (rec != null) MergeRec(rec, fresh, updates);
+                    }
+                }
+                // 2) 计划兜底：前方已决定但还没生成的格子
+                if (plan != null)
+                {
+                    foreach (System.Collections.DictionaryEntry de in plan)
+                    {
+                        if (!(de.Key is Vector2Int cell)) continue;
+                        long k = Key(cell.x, cell.y);
+                        if (!seen.Add(k)) continue;
+                        CellRec rec = ReadEntry(cell, de.Value);
+                        if (rec != null) MergeRec(rec, fresh, updates);
+                    }
+                }
+                if (fresh.Count == 0 && updates.Count == 0) return;
+
+                lock (_lock)
+                {
+                    _version++;
+                    List<int> idxs = new List<int>(fresh.Count + updates.Count);
+                    foreach (CellRec r in fresh)
+                    {
+                        _index[Key(r.X, r.Y)] = _ordered.Count;
+                        _ordered.Add(r);
+                        idxs.Add(_ordered.Count - 1);
+                    }
+                    foreach (KeyValuePair<int, CellRec> u in updates)
+                    {
+                        if (u.Key >= 0 && u.Key < _ordered.Count)
+                        {
+                            _ordered[u.Key] = u.Value;
+                            idxs.Add(u.Key);
+                        }
+                    }
+                    _verDelta[_version] = idxs;
+                    if (_verDelta.Count > 512)
+                    {
+                        List<int> keys = new List<int>(_verDelta.Keys);
+                        keys.Sort();
+                        int drop = keys.Count - 512;
+                        for (int i = 0; i < drop; i++) _verDelta.Remove(keys[i]);
+                        _trimBefore = keys[drop];
+                    }
+                }
+            }
+            catch (Exception e) { Plugin.Log("mapsync poll EX " + e.Message); }
+        }
+
+        private static void MergeRec(CellRec rec, List<CellRec> fresh, List<KeyValuePair<int, CellRec>> updates)
+        {
+            long k = Key(rec.X, rec.Y);
+            int idx;
+            if (_index.TryGetValue(k, out idx))
+            {
+                if (idx < 0 || idx >= _ordered.Count) return;
+                if (!SameRec(_ordered[idx], rec)) updates.Add(new KeyValuePair<int, CellRec>(idx, rec));
+            }
+            else fresh.Add(rec);
+        }
+
+        private static bool SameRec(CellRec a, CellRec b)
+        {
+            if (a == null || b == null) return false;
+            if (a.X != b.X || a.Y != b.Y || a.Gw != b.Gw || a.Gh != b.Gh || a.Rot != b.Rot) return false;
+            if (!string.Equals(a.Chunk, b.Chunk, StringComparison.Ordinal)) return false;
+            if (a.Zones == null || b.Zones == null) return ReferenceEquals(a.Zones, b.Zones);
+            if (a.Zones.Length != b.Zones.Length) return false;
+            for (int i = 0; i < a.Zones.Length; i++)
+                if (!string.Equals(a.Zones[i], b.Zones[i], StringComparison.Ordinal)) return false;
+            return true;
+        }
+
+        private static CellRec ReadSpawned(Vector2Int cell, object inst, object planEntry)
+        {
+            if (inst == null) return null;
+            object cd = _ciChunkF != null ? _ciChunkF.GetValue(inst) : null;
+            UnityEngine.Object cdo = cd as UnityEngine.Object;
+            if (cdo == null) return null;
+            Vector2Int gs = ReadGridSize(cd);
+            int rot;
+            if (planEntry != null && _rotF != null) rot = (int)_rotF.GetValue(planEntry);
+            else rot = QuatToDegrees(inst);
+            int[] zi = (planEntry != null && _zonesF != null) ? _zonesF.GetValue(planEntry) as int[] : null;
+            return new CellRec
+            {
+                X = cell.x,
+                Y = cell.y,
+                Gw = Mathf.Max(1, gs.x),
+                Gh = Mathf.Max(1, gs.y),
+                Rot = (rot >= 0 && rot <= 3) ? rot * 90 : rot,
+                Chunk = cdo.name,
+                Zones = ReadZoneNames(cd, zi, inst)
+            };
+        }
+
+        private static int QuatToDegrees(object inst)
+        {
+            try
+            {
+                object q = _ciRotF != null ? _ciRotF.GetValue(inst) : null;
+                if (q is Quaternion quat)
+                {
+                    int deg = Mathf.RoundToInt(quat.eulerAngles.y / 90f) * 90;
+                    return ((deg % 360) + 360) % 360;
+                }
+            }
+            catch { }
+            return 0;
+        }
+
+        private static string[] ReadZoneNames(object chunkData, int[] zoneIndices, object inst)
+        {
+            System.Collections.IList spawnedZones = _ciZonesF != null ? _ciZonesF.GetValue(inst) as System.Collections.IList : null;
+            System.Collections.IList pool = null;
+            try
+            {
+                FieldInfo af = chunkData.GetType().GetField("availableZones");
+                if (af != null) pool = af.GetValue(chunkData) as System.Collections.IList;
+            }
+            catch { }
+
+            // 实际生成的 zone 数量与槽位一致时，优先用真实名字
+            if (zoneIndices != null && spawnedZones != null && spawnedZones.Count == zoneIndices.Length && zoneIndices.Length > 0)
+            {
+                string[] arr = new string[spawnedZones.Count];
+                for (int i = 0; i < arr.Length; i++)
+                {
+                    UnityEngine.GameObject go = spawnedZones[i] as UnityEngine.GameObject;
+                    arr[i] = go != null ? StripZonePrefix(go.name) : "-";
+                }
+                return arr;
+            }
+            if (zoneIndices == null && spawnedZones != null && spawnedZones.Count > 0)
+            {
+                string[] arr = new string[spawnedZones.Count];
+                for (int i = 0; i < arr.Length; i++)
+                {
+                    UnityEngine.GameObject go = spawnedZones[i] as UnityEngine.GameObject;
+                    arr[i] = go != null ? StripZonePrefix(go.name) : "-";
+                }
+                return arr;
+            }
+            if (zoneIndices != null && pool != null)
+            {
+                string[] arr = new string[zoneIndices.Length];
+                for (int i = 0; i < arr.Length; i++)
+                {
+                    int ix = zoneIndices[i];
+                    arr[i] = (ix >= 0 && ix < pool.Count && pool[ix] is UnityEngine.Object zo) ? zo.name : "-";
+                }
+                return arr;
+            }
+            return Array.Empty<string>();
+        }
+
+        private static string StripZonePrefix(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return "-";
+            return name.StartsWith("Zone_", StringComparison.Ordinal) ? name.Substring(5) : name;
+        }
+
+        private static Vector2Int ReadGridSize(object chunkData)
+        {
+            try
+            {
+                FieldInfo gf = chunkData.GetType().GetField("gridSize");
+                if (gf != null) return (Vector2Int)gf.GetValue(chunkData);
+            }
+            catch { }
+            return Vector2Int.one;
+        }
+
+        private static int ReadSeed()
+        {
+            try
+            {
+                MethodInfo m = _cmType.GetMethod("TryGetSessionSeed", BindingFlags.Public | BindingFlags.Instance);
+                if (m != null)
+                {
+                    object[] a = { 0 };
+                    if ((bool)m.Invoke(_cm, a)) return (int)a[0];
+                }
+                FieldInfo rf = _cmType.GetField("_spawnResolver", BindingFlags.NonPublic | BindingFlags.Instance);
+                object r = rf != null ? rf.GetValue(_cm) : null;
+                if (r != null)
+                {
+                    FieldInfo sf = r.GetType().GetField("_sessionSeed", BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (sf != null) return (int)sf.GetValue(r);
+                }
+            }
+            catch { }
+            return 0;
+        }
+
+        private static void ResetData()
+        {
+            lock (_lock)
+            {
+                _ordered.Clear();
+                _index.Clear();
+                _verDelta.Clear();
+                _version = 0;
+                _trimBefore = 1;
+            }
+            Plugin.Log("mapsync: seed changed -> reset, seed=" + _seed);
+        }
+
+        private static void UpdatePlayer()
+        {
+            try
+            {
+                Type invT = Tweaks.FindType("Features.Inventory.PlayerInventoryManager");
+                object inv = invT != null ? invT.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null) : null;
+                Component comp = inv as Component;
+                if (comp == null) return;
+                Vector3 pos = comp.transform.position;
+                MethodInfo w2c = _cmType.GetMethod("WorldToCell", BindingFlags.Public | BindingFlags.Instance);
+                if (w2c == null) return;
+                Vector2Int cell = (Vector2Int)w2c.Invoke(_cm, new object[] { pos });
+                _px = cell.x;
+                _py = cell.y;
+                _hasPlayer = true;
+            }
+            catch { }
+        }
+
+        private static CellRec ReadEntry(Vector2Int cell, object entry)
+        {
+            if (entry == null) return null;
+            if (_validProp != null && !(bool)_validProp.GetValue(entry)) return null;
+            object cd = _chunkF != null ? _chunkF.GetValue(entry) : null;
+            if (cd == null) return null;
+            int rot = _rotF != null ? (int)_rotF.GetValue(entry) : 0;
+            int[] zi = _zonesF != null ? _zonesF.GetValue(entry) as int[] : null;
+            UnityEngine.Object cdo = cd as UnityEngine.Object;
+            string cname = cdo != null ? cdo.name : "?";
+            Vector2Int gs = Vector2Int.one;
+            try
+            {
+                FieldInfo gf = cd.GetType().GetField("gridSize");
+                if (gf != null) gs = (Vector2Int)gf.GetValue(cd);
+            }
+            catch { }
+            List<string> zones = new List<string>();
+            try
+            {
+                FieldInfo af = cd.GetType().GetField("availableZones");
+                System.Collections.IList list = af != null ? af.GetValue(cd) as System.Collections.IList : null;
+                if (list != null && zi != null)
+                {
+                    foreach (int ix in zi)
+                    {
+                        if (ix >= 0 && ix < list.Count && list[ix] is UnityEngine.Object zo) zones.Add(zo.name);
+                        else zones.Add("-");
+                    }
+                }
+            }
+            catch { }
+            return new CellRec
+            {
+                X = cell.x,
+                Y = cell.y,
+                Gw = Mathf.Max(1, gs.x),
+                Gh = Mathf.Max(1, gs.y),
+                Rot = (rot <= 3 ? rot * 90 : rot),
+                Chunk = cname,
+                Zones = zones.ToArray()
+            };
+        }
+
+        private static void ServeLoop()
+        {
+            while (true)
+            {
+                TcpClient client = null;
+                try
+                {
+                    client = _listener.AcceptTcpClient();
+                    HandleClient(client);
+                }
+                catch (Exception)
+                {
+                    try { if (_listener == null) return; } catch { return; }
+                    Thread.Sleep(20);
+                }
+                finally { try { if (client != null) client.Close(); } catch { } }
+            }
+        }
+
+        private static void HandleClient(TcpClient client)
+        {
+            try
+            {
+                client.ReceiveTimeout = 3000;
+                client.SendTimeout = 5000;
+                NetworkStream ns = client.GetStream();
+                byte[] buf = new byte[8192];
+                int n = ns.Read(buf, 0, buf.Length);
+                if (n <= 0) return;
+                string req = Encoding.ASCII.GetString(buf, 0, n);
+                string line = req.Split('\n')[0].Trim();
+                string[] parts = line.Split(' ');
+                if (parts.Length < 2) return;
+                string path = parts[1];
+
+                byte[] body;
+                string ctype;
+                if (path.StartsWith("/map.json", StringComparison.Ordinal))
+                {
+                    int v = 0;
+                    int qi = path.IndexOf("?v=", StringComparison.Ordinal);
+                    if (qi >= 0) int.TryParse(path.Substring(qi + 3), out v);
+                    body = Encoding.UTF8.GetBytes(BuildJson(v));
+                    ctype = "application/json; charset=utf-8";
+                }
+                else
+                {
+                    string file = MapPath(path);
+                    if (file == null || !File.Exists(file))
+                    {
+                        body = Encoding.UTF8.GetBytes("{\"error\":\"not found\"}");
+                        WriteResponse(ns, 404, "Not Found", "application/json; charset=utf-8", body, true);
+                        return;
+                    }
+                    body = File.ReadAllBytes(file);
+                    ctype = ContentType(file);
+                }
+                WriteResponse(ns, 200, "OK", ctype, body, path.StartsWith("/map.json", StringComparison.Ordinal));
+            }
+            catch { }
+        }
+
+        private static void WriteResponse(NetworkStream ns, int code, string reason, string ctype, byte[] body, bool noStore)
+        {
+            StringBuilder head = new StringBuilder(256);
+            head.Append("HTTP/1.1 ").Append(code).Append(' ').Append(reason).Append("\r\n");
+            head.Append("Content-Type: ").Append(ctype).Append("\r\n");
+            head.Append("Content-Length: ").Append(body.Length).Append("\r\n");
+            head.Append(noStore ? "Cache-Control: no-store\r\n" : "Cache-Control: max-age=3600\r\n");
+            head.Append("Access-Control-Allow-Origin: *\r\n");
+            head.Append("Access-Control-Allow-Private-Network: true\r\n");
+            head.Append("Connection: close\r\n\r\n");
+            byte[] hb = Encoding.ASCII.GetBytes(head.ToString());
+            ns.Write(hb, 0, hb.Length);
+            if (body.Length > 0) ns.Write(body, 0, body.Length);
+            ns.Flush();
+        }
+
+        private static string MapPath(string path)
+        {
+            if (_rootDir == null) return null;
+            int q = path.IndexOf('?');
+            if (q >= 0) path = path.Substring(0, q);
+            string rel = path.TrimStart('/');
+            if (rel.Length == 0) rel = "index.html";
+            rel = rel.Replace('/', Path.DirectorySeparatorChar);
+            if (rel.Contains("..")) return null;
+            return Path.Combine(_rootDir, rel);
+        }
+
+        private static string ContentType(string file)
+        {
+            switch (Path.GetExtension(file).ToLowerInvariant())
+            {
+                case ".html":
+                case ".htm": return "text/html; charset=utf-8";
+                case ".js": return "application/javascript; charset=utf-8";
+                case ".css": return "text/css; charset=utf-8";
+                case ".json": return "application/json; charset=utf-8";
+                case ".png": return "image/png";
+                case ".jpg":
+                case ".jpeg": return "image/jpeg";
+                case ".svg": return "image/svg+xml";
+                case ".ico": return "image/x-icon";
+                default: return "application/octet-stream";
+            }
+        }
+
+        private static string BuildJson(int clientV)
+        {
+            List<CellRec> cells;
+            int ver;
+            lock (_lock)
+            {
+                ver = _version;
+                cells = new List<CellRec>();
+                if (clientV > 0 && clientV >= _trimBefore && clientV < ver)
+                {
+                    HashSet<int> seen = new HashSet<int>();
+                    for (int v = clientV + 1; v <= ver; v++)
+                    {
+                        List<int> list;
+                        if (_verDelta.TryGetValue(v, out list))
+                        {
+                            foreach (int i in list)
+                            {
+                                if (seen.Add(i) && i < _ordered.Count) cells.Add(_ordered[i]);
+                            }
+                        }
+                    }
+                }
+                else if (clientV != ver)
+                {
+                    cells.AddRange(_ordered);
+                }
+            }
+            StringBuilder sb = new StringBuilder(1024 + cells.Count * 80);
+            sb.Append("{\"v\":").Append(ver).Append(",\"seed\":").Append(_seed);
+            if (_hasPlayer) sb.Append(",\"p\":[").Append(_px).Append(',').Append(_py).Append(']');
+            sb.Append(",\"cells\":[");
+            for (int i = 0; i < cells.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                CellRec c = cells[i];
+                sb.Append("{\"x\":").Append(c.X).Append(",\"y\":").Append(c.Y)
+                  .Append(",\"c\":\"").Append(Esc(c.Chunk))
+                  .Append("\",\"w\":").Append(c.Gw).Append(",\"h\":").Append(c.Gh)
+                  .Append(",\"r\":").Append(c.Rot).Append(",\"z\":[");
+                for (int j = 0; j < c.Zones.Length; j++)
+                {
+                    if (j > 0) sb.Append(',');
+                    sb.Append('"').Append(Esc(c.Zones[j])).Append('"');
+                }
+                sb.Append("]}");
+            }
+            sb.Append("]}");
+            return sb.ToString();
+        }
+
+        private static string Esc(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            StringBuilder sb = null;
+            for (int i = 0; i < s.Length; i++)
+            {
+                char ch = s[i];
+                if (ch == '"' || ch == '\\')
+                {
+                    if (sb == null) { sb = new StringBuilder(s.Length + 8); if (i > 0) sb.Append(s, 0, i); }
+                    sb.Append('\\').Append(ch);
+                }
+                else if (ch < ' ')
+                {
+                    if (sb == null) { sb = new StringBuilder(s.Length + 8); if (i > 0) sb.Append(s, 0, i); }
+                    sb.Append(' ');
+                }
+                else if (sb != null) sb.Append(ch);
+            }
+            return sb == null ? s : sb.ToString();
+        }
+
+        internal static void Shutdown()
+        {
+            try { if (_listener != null) _listener.Stop(); } catch { }
+            _listener = null;
         }
     }
 

@@ -1,0 +1,2465 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Project Exhibitionist · 地图种子查看器</title>
+  <style>
+    :root {
+      --bg-dark: #181c20;
+      --panel-bg: #21272d;
+      --panel-border: #343e47;
+      --text-main: #e4eaef;
+      --text-muted: #9aa7b2;
+      --accent: #6ad39a;
+      --accent-blue: #58a6ff;
+      --danger: #f85149;
+      --road-bg: #4f5f5f;
+      --lot-light: #d8d4c6;
+      --bldg-dark: #2a3038;
+      --bldg-stroke: #cfd6d0;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      height: 100vh;
+      width: 100vw;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      user-select: none;
+    }
+
+    /* 顶部控制栏 */
+    header {
+      background: var(--panel-bg);
+      border-bottom: 1px solid var(--panel-border);
+      padding: 8px 14px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 14px;
+      z-index: 10;
+    }
+
+    .brand {
+      font-weight: 700;
+      font-size: 15px;
+      color: var(--accent);
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-right: 4px;
+    }
+
+    .brand span.badge {
+      font-size: 11px;
+      background: rgba(106, 211, 154, 0.15);
+      color: var(--accent);
+      border: 1px solid rgba(106, 211, 154, 0.4);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-weight: 500;
+    }
+
+    .ctrl-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(0, 0, 0, 0.2);
+      padding: 4px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--panel-border);
+    }
+
+    .ctrl-group label {
+      font-size: 12px;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    input[type="number"],
+    input[type="text"],
+    select {
+      background: #14181c;
+      border: 1px solid #3c4752;
+      color: var(--text-main);
+      padding: 4px 7px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: "JetBrains Mono", Consolas, monospace;
+      outline: none;
+    }
+
+    input[type="number"]:focus,
+    input[type="text"]:focus,
+    select:focus {
+      border-color: var(--accent);
+    }
+
+    .w-seed { width: 115px; }
+    .w-coord { width: 72px; }
+
+    button {
+      background: #2d363f;
+      color: var(--text-main);
+      border: 1px solid #45525f;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+
+    button:hover {
+      background: #3a4652;
+      border-color: #627384;
+    }
+
+    button.primary {
+      background: #238636;
+      border-color: #2ea043;
+      color: #fff;
+      font-weight: 600;
+    }
+
+    button.primary:hover {
+      background: #2ea043;
+    }
+
+    .toggle-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      color: var(--text-main);
+      cursor: pointer;
+      padding: 2px 4px;
+    }
+
+    .toggle-label input {
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    /* 主体区域 */
+    .workspace {
+      flex: 1;
+      display: flex;
+      min-height: 0;
+      position: relative;
+    }
+
+    #main {
+      flex: 1;
+      position: relative;
+      background: var(--road-bg);
+      overflow: hidden;
+      cursor: grab;
+    }
+
+    #main.dragging {
+      cursor: grabbing;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* 地图左上角浮动工具与快速缩放 */
+    .map-overlay-tools {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      pointer-events: auto;
+    }
+
+    .zoom-box {
+      display: flex;
+      background: rgba(33, 39, 45, 0.92);
+      border: 1px solid var(--panel-border);
+      border-radius: 6px;
+      overflow: hidden;
+      backdrop-filter: blur(4px);
+    }
+
+    .zoom-box button {
+      border: none;
+      border-right: 1px solid var(--panel-border);
+      border-radius: 0;
+      padding: 6px 10px;
+      background: transparent;
+    }
+
+    .zoom-box button:last-child {
+      border-right: none;
+    }
+
+    .zoom-box button:hover {
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    /* 悬停浮窗 */
+    #hover-tooltip {
+      position: absolute;
+      pointer-events: none;
+      background: rgba(22, 27, 32, 0.95);
+      border: 1px solid #52606d;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 12px;
+      line-height: 1.55;
+      color: var(--text-main);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+      min-width: 240px;
+      max-width: 320px;
+      z-index: 20;
+      display: none;
+      backdrop-filter: blur(6px);
+    }
+
+    .tt-title {
+      font-weight: 700;
+      font-size: 13px;
+      color: #fff;
+      border-bottom: 1px solid #36414c;
+      padding-bottom: 4px;
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .tt-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 12px;
+    }
+
+    .tt-key {
+      color: var(--text-muted);
+    }
+
+    .tt-val {
+      font-family: "JetBrains Mono", Consolas, monospace;
+      text-align: right;
+    }
+
+    .tt-slots {
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px dashed #36414c;
+    }
+
+    .tt-slot-item {
+      font-family: "JetBrains Mono", Consolas, monospace;
+      font-size: 11px;
+      color: #cfd6d0;
+      padding: 1px 0;
+    }
+
+    .tt-poi-star {
+      color: #ffd33d;
+      font-weight: 700;
+    }
+
+    .tt-warn {
+      margin-top: 4px;
+      color: #ffab70;
+      font-size: 11px;
+    }
+
+    /* 右侧侧边栏 */
+    aside {
+      width: 330px;
+      background: var(--panel-bg);
+      border-left: 1px solid var(--panel-border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      z-index: 10;
+    }
+
+    .panel-section {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--panel-border);
+    }
+
+    .panel-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    /* 图例网格 */
+    .legend-biomes {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+
+    .biome-chip {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 7px;
+      border-radius: 5px;
+      font-size: 11px;
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .color-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+      flex-shrink: 0;
+      border: 1px solid rgba(255, 255, 255, 0.35);
+    }
+
+    .legend-pois {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 6px;
+    }
+
+    .poi-chip {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 4px 7px;
+      border-radius: 5px;
+      background: rgba(0, 0, 0, 0.22);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      font-size: 11px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .poi-chip:hover {
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .poi-chip.dimmed {
+      opacity: 0.35;
+    }
+
+    .poi-badge {
+      width: 20px;
+      height: 20px;
+      border-radius: 4px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 11px;
+      color: #fff;
+      flex-shrink: 0;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+    }
+
+    /* 概率统计表 */
+    table.stat-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11.5px;
+      margin-top: 4px;
+    }
+
+    table.stat-table th,
+    table.stat-table td {
+      padding: 4px 6px;
+      text-align: left;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    table.stat-table th {
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    table.stat-table td.num,
+    table.stat-table th.num {
+      text-align: right;
+      font-family: "JetBrains Mono", Consolas, monospace;
+    }
+
+    .note-list {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      line-height: 1.55;
+      padding-left: 16px;
+    }
+
+    .note-list li {
+      margin-bottom: 5px;
+    }
+
+    /* 底部状态条 */
+    footer {
+      background: #14181c;
+      border-top: 1px solid var(--panel-border);
+      padding: 5px 14px;
+      font-size: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--text-muted);
+      font-family: "JetBrains Mono", Consolas, monospace;
+      z-index: 10;
+    }
+
+    .status-group {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .status-pill {
+      color: var(--text-main);
+    }
+
+    #verify-result {
+      margin-top: 8px;
+      font-size: 11px;
+      font-family: "JetBrains Mono", Consolas, monospace;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid var(--panel-border);
+      border-radius: 5px;
+      padding: 8px;
+      display: none;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 顶部工具栏 -->
+  <header>
+    <div class="brand">
+      <span>PROJECT EXHIBITIONIST</span>
+      <span class="badge">地图种子查看器</span>
+    </div>
+
+    <!-- 1. 种子输入 -->
+    <div class="ctrl-group">
+      <label for="seed-input">SEED</label>
+      <input type="number" id="seed-input" class="w-seed" value="123456789" step="1" />
+      <button class="primary" id="btn-apply-seed">应用</button>
+      <button id="btn-rand-seed">随机</button>
+    </div>
+
+    <!-- 3. 坐标跳转 -->
+    <div class="ctrl-group">
+      <label>跳转</label>
+      <select id="coord-mode" title="选择输入坐标单位">
+        <option value="cell">格坐标 (Cell)</option>
+        <option value="meter">世界坐标 (米 ÷60)</option>
+      </select>
+      <input type="number" id="jump-x" class="w-coord" placeholder="X" value="0" />
+      <input type="number" id="jump-y" class="w-coord" placeholder="Y / Z" value="0" />
+      <button id="btn-jump">跳转</button>
+      <button id="btn-origin" title="回到出生点 (0, 0)">出生点(0,0)</button>
+    </div>
+
+    <!-- 可选视图开关 -->
+    <div class="ctrl-group">
+      <label class="toggle-label" title="淡化普通地块，高亮显示 8 类特殊目标点 (POI)">
+        <input type="checkbox" id="chk-poi-only" />
+        <span>只看 POI</span>
+      </label>
+      <label class="toggle-label" title="显示地铁区块周围 2 格（切比雪夫距离）间距限制虚线圈">
+        <input type="checkbox" id="chk-subway-ring" checked />
+        <span>地铁2格间距圈</span>
+      </label>
+      <label class="toggle-label" title="在街道底色上叠加街区（Biome）色调以便观察 Voronoi 街区分布">
+        <input type="checkbox" id="chk-biome-tint" />
+        <span>街区底色</span>
+      </label>
+      <label class="toggle-label" title="叠加游戏内圆形小地图遮罩与白环描边">
+        <input type="checkbox" id="chk-minimap-ring" />
+        <span>圆形小地图框</span>
+      </label>
+      <label class="toggle-label" title="近似模拟游戏的 POI 干旱补偿：按节奏标记可能被强插的便利店/泳池/美术馆（仅演示，不代表真实位置）">
+        <input type="checkbox" id="chk-drought-sim" />
+        <span>模拟干旱 POI</span>
+      </label>
+      <label class="toggle-label" title="同步时让查看器自动跟随角色当前位置并居中">
+        <input type="checkbox" id="chk-follow" checked />
+        <span>跟随角色</span>
+      </label>
+      <label class="toggle-label" style="color:#ff6b6b;" title="仅 0~4 级排位/普通模式需要开启：这些等级会禁用泳池/商场/地铁/公园并移除地铁区块">
+        <input type="checkbox" id="chk-classic" />
+        <span style="color:#ff6b6b;font-weight:700;">Classic 限制</span>
+        <span style="color:#ff9d9d;font-size:11px;">（0~4级开启这个）</span>
+      </label>
+    </div>
+
+  </header>
+
+  <!-- 模式说明横幅 -->
+  <div style="background:#171c23;border-bottom:1px solid #2a3038;color:#c9d1d9;font-size:12px;padding:6px 14px;line-height:1.45;">
+    <b style="color:#6ad39a;">本视图 = Free 模式（非地图浏览）确定性布局。</b>
+    Classic / 地图浏览模式另有「POI 干旱补偿」，POI 位置会随行走路径与近期所见漂移，与这里不一致。
+  </div>
+
+  <!-- 同步状态栏 -->
+  <div style="display:flex;gap:10px;align-items:center;padding:4px 14px;background:#12171d;border-bottom:1px solid #2a3038;font-size:12px;color:#8b98a5;">
+    <span id="sync-status">同步: 未启动</span>
+    <button id="btn-sync-load" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:1px 8px;cursor:pointer;font-size:12px;">加载实际结果</button>
+    <input type="file" id="sync-file" accept=".json,application/json" style="display:none" />
+    <span style="color:#5c6773;">插件打开时自动同步；关掉页面后刷新标签页即可重连</span>
+  </div>
+
+  <!-- 主工作区 -->
+  <div class="workspace">
+    <div id="main">
+      <canvas id="map-canvas"></canvas>
+
+      <!-- 左上角快捷缩放 -->
+      <div class="map-overlay-tools">
+        <div class="zoom-box">
+          <button id="btn-zoom-in" title="放大">+</button>
+          <button id="btn-zoom-reset" title="重置缩放 (36px/格)">36px/格</button>
+          <button id="btn-zoom-out" title="缩小">−</button>
+        </div>
+      </div>
+
+      <!-- 悬停信息浮窗 -->
+      <div id="hover-tooltip"></div>
+    </div>
+
+    <!-- 右侧图例与统计面板 -->
+    <aside>
+      <div id="classic-note" style="display:none;background:#1d1416;border:1px solid #5c2b2b;border-left:3px solid #ff6b6b;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12px;line-height:1.6;color:#ffd7d7;">
+        <div style="font-weight:700;color:#ff6b6b;margin-bottom:4px;">Classic 限制（0~4 级专用）</div>
+        <div>开启后按游戏内 <b>RankPoiPolicy</b> 的规则过滤：<b>禁用 泳池 / 商场 / 地铁 / 公园</b>，地铁区块整个从池子里移除；允许 便利店 / 美术馆 / 大学 / 体育场。</div>
+        <div style="margin-top:6px;">• <b>Rank 05（Horny Slut Declared）或管理员：限制已解除，不要开</b>，否则会把实际存在的泳池/mall 过滤掉；<br>• 3×3 / 4×4 抽到被禁 POI 时，游戏里会留下一个没有建筑的空块，本视图同样不绘制；<br>• 只影响"确定性推算"区域，已同步的实测格永远以游戏实际数据为准。</div>
+      </div>
+      <div id="drought-note" style="display:none;background:#171c23;border:1px solid #2a3038;border-left:3px solid #ff9d3c;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12px;line-height:1.6;color:#c9d1d9;">
+        <div style="font-weight:700;color:#ff9d3c;margin-bottom:4px;">模拟干旱补偿（仅演示）</div>
+        <div><b>真实机制</b>：走路累计 ≥120 米没碰到任何 POI → 在你<b>前进方向</b>强插便利店/泳池/美术馆；420 米是硬上限；插入的特殊建筑占用 ±2 格间距，会把它附近原本的特殊建筑降级成普通街区；近期见过的类型降权（×0.15 / ×0.35 / ×0.65）。</div>
+        <div style="margin-top:6px;"><b>本模拟的局限</b>：真实机制只沿你<b>实际行走的那条路径</b>插入，且跟方向/历史有关，纯种子算不出来。这里按「距出生点每 4 格、且附近无特殊」打橙色虚线框做示意，只展示<b>密度与外观</b>，<b>不代表游戏里的真实位置</b>。</div>
+      </div>
+      <!-- 5. 图例：街区与 POI -->
+      <div class="panel-section">
+        <div class="panel-title">
+          <span>街区图例 (Biomes)</span>
+          <span style="font-size:11px;color:var(--text-muted);font-weight:400;">Voronoi 3×3 抖动</span>
+        </div>
+        <div class="legend-biomes" id="legend-biomes"></div>
+
+        <div class="panel-title" style="margin-top:10px;">
+          <span>特殊目标点 (8 POIs)</span>
+          <span style="font-size:11px;color:var(--text-muted);font-weight:400;">点击可筛选高亮</span>
+        </div>
+        <div class="legend-pois" id="legend-pois"></div>
+      </div>
+
+      <!-- 7. 概率面板 -->
+      <div class="panel-section">
+        <div class="panel-title">
+          <span>区块占比（实测按格数）</span>
+          <button id="btn-verify-seed" style="padding:2px 7px;font-size:11px;">400×400 自检</button>
+        </div>
+        <table class="stat-table">
+          <thead>
+            <tr>
+              <th>区块名</th>
+              <th>尺寸</th>
+              <th class="num">权重</th>
+              <th class="num">单格抽中率</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>X 1x1</td><td>1×1</td><td class="num">100</td><td class="num">47.12%</td></tr>
+            <tr><td>T 1x1</td><td>1×1</td><td class="num">100</td><td class="num">47.12%</td></tr>
+            <tr><td>Mono 1x1</td><td>1×1</td><td class="num">10</td><td class="num">4.71%</td></tr>
+            <tr><td>Mono 3x3</td><td>3×3</td><td class="num">1.47</td><td class="num">0.69% (面积≈6.7%)</td></tr>
+            <tr><td>Subway</td><td>1×1</td><td class="num">0.56</td><td class="num">0.26%</td></tr>
+            <tr><td>Mono 4x4</td><td>4×4</td><td class="num">0.21</td><td class="num">0.10% (面积≈0.9%)</td></tr>
+          </tbody>
+        </table>
+
+        <div id="verify-result"></div>
+
+        <div class="panel-title" style="margin-top:12px;">
+          <span>POI 概率与平均间距 (1格=60m)</span>
+        </div>
+        <table class="stat-table">
+          <thead>
+            <tr>
+              <th>POI 名称</th>
+              <th>所在区块</th>
+              <th class="num">占比</th>
+              <th class="num">平均间距</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>商 Mall (商场)</td><td>Mono 3x3</td><td class="num">0.40%</td><td class="num">~15 km</td></tr>
+            <tr><td>便 Kombini (便利店)</td><td>Mono 1x1</td><td class="num">0.27%</td><td class="num">~23 km</td></tr>
+            <tr><td>地 Subway (地铁)</td><td>Subway</td><td class="num">0.26%</td><td class="num">~23 km</td></tr>
+            <tr><td>泳 Pool (泳池)</td><td>Mono 1x1</td><td class="num">0.24%</td><td class="num">~25 km</td></tr>
+            <tr><td>美 ArtGallery (美术馆)</td><td>Mono 1x1</td><td class="num">0.21%</td><td class="num">~29 km</td></tr>
+            <tr><td>大 University (大学)</td><td>Mono 3x3</td><td class="num">0.20%</td><td class="num">~30 km</td></tr>
+            <tr><td>园 Park (公园)</td><td>Mono 3x3</td><td class="num">0.10%</td><td class="num">~61 km</td></tr>
+            <tr><td>体 Stadium (体育场)</td><td>Mono 4x4</td><td class="num">0.10%</td><td class="num">~61 km</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 5. 已知偏差说明 -->
+      <div class="panel-section">
+        <div class="panel-title">已知偏差与实现说明</div>
+        <ul class="note-list">
+          <li><strong>大地块面积占比放大</strong>：区块按单格独立掷骰，1 个 3×3 区块占 9 格，因此视觉面积占比约为 <code>0.69% × 9 ≈ 6.7%</code>，属于原算法特性。</li>
+          <li><strong>街区池兜底机制</strong>：6 类区块均自带 <code>availableZones</code>，优先使用自带池，街区池仅在槽位无法匹配时兜底。</li>
+          <li><strong>槽位与旋转近似</strong>：T 区块内部采用 <code>Half + 2×Quarter</code> 组合，随区块整体按 <code>(h % 4) × 90°</code> 旋转。</li>
+          <li><strong>贴图容错降级</strong>：若 <code>assets/tiles/*.png</code> 尚未放入，自动以工程蓝图（米白底块+深色建筑内缩块）渲染。</li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
+  <!-- 8. 底部状态栏 -->
+  <footer>
+    <div class="status-group">
+      <span>当前格: <strong class="status-pill" id="st-cell">CELL (0, 0)</strong></span>
+      <span>世界坐标: <strong class="status-pill" id="st-world">(0m, 0m)</strong></span>
+      <span>距出生点: <strong class="status-pill" id="st-dist">0m</strong></span>
+    </div>
+    <div class="status-group">
+      <span id="st-assets">贴图加载: 0/45 (蓝图兜底模式)</span>
+      <span>视野格数: <strong class="status-pill" id="st-visible">0</strong></span>
+      <span>缩放: <strong class="status-pill" id="st-zoom">36 px/格</strong></span>
+    </div>
+  </footer>
+
+  <script>
+    "use strict";
+
+    // ============================================================================
+    // 1. 真实数据与映射表（严格按文档第 4、11、12 节定义）
+    // ============================================================================
+    const BIOMES = [
+      { name: "Residential", weight: 40, tint: "#31465e", label: "住宅区" },
+      { name: "Suburban",    weight: 35, tint: "#2f5344", label: "郊区" },
+      { name: "City",        weight: 25, tint: "#4b3150", label: "城区" }
+    ];
+    const TOTAL_BIOME_WEIGHT = BIOMES.reduce((s, b) => s + b.weight, 0);
+
+    // 每个街区允许的地块（来自游戏日志 dump）
+    const BIOME_ZONE_SETS = {
+      "Residential": ["Residential_1","Residential_2","Residential_3","Residential_4","Residential_5","Residential_6"],
+      "Suburban": ["Suburban_2","Suburban_3","Suburban_4","Suburban_5","Suburban_6","Suburban_7","Suburban_Sushi_1","Kombini","Subway"],
+      "City": ["City1","City2","City3","City4","City5","City6","City7","City8","City9","City10","City11",
+               "Pool","Art Gallery","University","Mall","Park","Stadium"]
+    };
+    // 街区回退：City 没有 Quarter 地块时会借用 Suburban 的
+    const BIOME_FALLBACK = { "City": "Suburban", "Suburban": "Residential", "Residential": "Suburban" };
+
+    function canonZoneName(n) { return n.replace(/\(Half\)$/, ""); }
+
+const QUARTER_POOL = [
+      { n:"Residential_1", w:20 },      { n:"Suburban_5", w:25 },   { n:"Suburban_4", w:50 },
+      { n:"Residential_2", w:50 },      { n:"Residential_3", w:50 },{ n:"Residential_4", w:50 },
+      { n:"Residential_5", w:50 },      { n:"Residential_6", w:50 },{ n:"Suburban_2", w:50 },
+      { n:"Suburban_3", w:50 },         { n:"Suburban_Sushi_1", w:15 },
+      { n:"Suburban_6", w:50 },         { n:"Suburban_7", w:50 }
+    ];
+
+    const CHUNKS = [
+      {
+        name: "Mono 1x1", w: 10, gw: 1, gh: 1, slots: ["Full"],
+        pool: [
+          { n: "Kombini", w: 11, occ: "Full", poi: "Kombini" },
+          // 游戏里的真实顺序（不是 City1..11）
+          { n: "City11", w: 15, occ: "Full" }, { n: "City8", w: 15, occ: "Full" },
+          { n: "City1", w: 15, occ: "Full" },  { n: "City2", w: 15, occ: "Full" },
+          { n: "City3", w: 15, occ: "Full" },  { n: "City4", w: 15, occ: "Full" },
+          { n: "City5", w: 15, occ: "Full" },  { n: "City6", w: 15, occ: "Full" },
+          { n: "City7", w: 15, occ: "Full" },  { n: "City9", w: 15, occ: "Full" },
+          { n: "City10", w: 15, occ: "Full" },
+          { n: "Art Gallery", w: 8.5, occ: "Full", poi: "ArtGallery" },
+          { n: "Pool", w: 10, occ: "Full", poi: "Pool" }
+        ]
+      },
+      {
+        name: "X 1x1", w: 100, gw: 1, gh: 1, slots: ["Quarter", "Quarter", "Quarter", "Quarter"],
+        pool: QUARTER_POOL.map(z => ({ ...z, occ: "Quarter" }))
+      },
+      {
+        name: "T 1x1", w: 100, gw: 1, gh: 1, slots: ["Half", "Quarter", "Quarter"],
+        pool: [
+          ...QUARTER_POOL.map(z => ({ ...z, occ: "Quarter" })),
+          { n: "Residential_2(Half)", w: 100, occ: "Half" },
+          { n: "Residential_3(Half)", w: 100, occ: "Half" }
+        ]
+      },
+      {
+        name: "Subway", w: 0.56, gw: 1, gh: 1, slots: ["Half", "Quarter", "Quarter"],
+        pool: [
+          ...QUARTER_POOL.map(z => ({ ...z, occ: "Quarter" })),
+          { n: "Subway", w: 30, occ: "Half", poi: "Subway" }
+        ]
+      },
+      {
+        name: "Mono 3x3", w: 1.47, gw: 3, gh: 3, slots: ["Full"],
+        pool: [
+          { n: "Park 3x3", w: 0.21, occ: "Full", poi: "Park" },
+          { n: "University 3x3", w: 0.42, occ: "Full", poi: "University" },
+          { n: "Mall 3x3", w: 0.84, occ: "Full", poi: "Mall" }
+        ]
+      },
+      {
+        name: "Mono 4x4", w: 0.21, gw: 4, gh: 4, slots: ["Full"],
+        pool: [
+          { n: "Stadium 4x4", w: 0.21, occ: "Full", poi: "Stadium" }
+        ]
+      }
+    ];
+
+    // 区块分类与权重汇总（第 3.3 节）
+    // 注意：地铁区块是 1x1，属于 small 组，不是一个独立组（与游戏一致）
+    const SMALL_CHUNKS = CHUNKS.filter(c => c.gw === 1 && c.gh === 1);
+    const LARGE_CHUNKS = CHUNKS.filter(c => c.gw > 1 || c.gh > 1);
+    const SUBWAY_CHUNK = CHUNKS.find(c => c.name === "Subway");
+
+    // 街区对特定区块的权重倍率（来自游戏数据：City 把 Mono 1x1 提升 20 倍）
+    const BIOME_CHUNK_MULT = { "City": { "Mono 1x1": 20 } };
+    function chunkWeightFor(chunk, biomeName) {
+      const m = BIOME_CHUNK_MULT[biomeName];
+      return m && m[chunk.name] ? chunk.w * m[chunk.name] : chunk.w;
+    }
+const W_SMALL = SMALL_CHUNKS.reduce((s, c) => s + c.w, 0); // 210.56（含地铁 0.56）
+    const W_LARGE = LARGE_CHUNKS.reduce((s, c) => s + c.w, 0); // 1.68
+    const W_TOTAL = W_SMALL + W_LARGE;                         // 212.24
+
+    // 8 类 POI 视觉标识配置（第 4.3、6、7.5 节）
+    const POI_META = {
+      Subway:     { char: "地", name: "Subway (地铁)",     color: "#2ea043" },
+      Kombini:    { char: "便", name: "Kombini (便利店)",  color: "#f0883e" },
+      Pool:       { char: "泳", name: "Pool (泳池)",       color: "#388bfd" },
+      ArtGallery: { char: "美", name: "ArtGallery (美术馆)", color: "#bc8cff" },
+      Mall:       { char: "商", name: "Mall (商场)",       color: "#db61a2" },
+      University: { char: "大", name: "University (大学)", color: "#d29922" },
+      Park:       { char: "园", name: "Park (公园)",       color: "#3fb950" },
+      Stadium:    { char: "体", name: "Stadium (体育场)",  color: "#f85149" }
+    };
+
+    // 第 12.2 / 12.3 节：严格按文档路径定义 45 张地块图清单与尺寸
+    const TILE_FILES = {
+      "POI - Art Gallery Shell": "assets/tiles/POI_-_Art_Gallery_Shell.png",
+      "POI - Pool Shell": "assets/tiles/POI_-_Pool_Shell.png",
+      "POI - Mall Shell": "assets/tiles/POI_-_Mall_Shell.png",
+      "POI - University Shell": "assets/tiles/POI_-_University_Shell.png",
+      "POI - Stadium Shell": "assets/tiles/POI_-_Stadium_Shell.png",
+      "City1 - Full - Chunk1x1": "assets/tiles/City1_-_Full_-_Chunk1x1.png",
+      "City10 - Full - Chunk1x1": "assets/tiles/City10_-_Full_-_Chunk1x1.png",
+      "City11 - Full - Chunk1x1": "assets/tiles/City11_-_Full_-_Chunk1x1.png",
+      "City2 - Full - Chunk1x1": "assets/tiles/City2_-_Full_-_Chunk1x1.png",
+      "City3 - Full - Chunk1x1": "assets/tiles/City3_-_Full_-_Chunk1x1.png",
+      "City4 - Full - Chunk1x1": "assets/tiles/City4_-_Full_-_Chunk1x1.png",
+      "City5 - Full - Chunk1x1": "assets/tiles/City5_-_Full_-_Chunk1x1.png",
+      "City6 - Full - Chunk1x1": "assets/tiles/City6_-_Full_-_Chunk1x1.png",
+      "City7 - Full - Chunk1x1": "assets/tiles/City7_-_Full_-_Chunk1x1.png",
+      "City8 - Full - Chunk1x1": "assets/tiles/City8_-_Full_-_Chunk1x1.png",
+      "City9 - Full - Chunk1x1": "assets/tiles/City9_-_Full_-_Chunk1x1.png",
+      "CityCross - Full - Chunk1x1": "assets/tiles/CityCross_-_Full_-_Chunk1x1.png",
+      "Suburban_Kombini - Full - Chunk1x1": "assets/tiles/Suburban_Kombini_-_Full_-_Chunk1x1.png",
+      "City - Half - Chunk1x1": "assets/tiles/City_-_Half_-_Chunk1x1.png",
+      "Residential_1 - Half - Chunk1x1": "assets/tiles/Residential_1_-_Half_-_Chunk1x1.png",
+      "Residential_2 - Half - Chunk1x1": "assets/tiles/Residential_2_-_Half_-_Chunk1x1.png",
+      "Residential_3 - Half - Chunk1x1": "assets/tiles/Residential_3_-_Half_-_Chunk1x1.png",
+      "Residential_Kombini_1 - Half - Chunk1x1": "assets/tiles/Residential_Kombini_1_-_Half_-_Chunk1x1.png",
+      "Suburban_Subway_1 - Half - Chunk1x1": "assets/tiles/Suburban_Subway_1_-_Half_-_Chunk1x1.png",
+      "Suburban_Subway_2 - Half - Chunk1x1": "assets/tiles/Suburban_Subway_2_-_Half_-_Chunk1x1.png",
+      "Suburban_Subway_Closed_1 - Half - Chunk1x1": "assets/tiles/Suburban_Subway_Closed_1_-_Half_-_Chunk1x1.png",
+      "Suburban_Subway_Closed_2 - Half - Chunk1x1": "assets/tiles/Suburban_Subway_Closed_2_-_Half_-_Chunk1x1.png",
+      "Residential_1 - Quarter - Chunk1x1": "assets/tiles/Residential_1_-_Quarter_-_Chunk1x1.png",
+      "Residential_2 - Quarter - Chunk1x1": "assets/tiles/Residential_2_-_Quarter_-_Chunk1x1.png",
+      "Residential_3 - Quarter - Chunk1x1": "assets/tiles/Residential_3_-_Quarter_-_Chunk1x1.png",
+      "Residential_4 - Quarter - Chunk1x1": "assets/tiles/Residential_4_-_Quarter_-_Chunk1x1.png",
+      "Residential_5 - Quarter - Chunk1x1": "assets/tiles/Residential_5_-_Quarter_-_Chunk1x1.png",
+      "Residential_6 - Quarter - Chunk1x1": "assets/tiles/Residential_6_-_Quarter_-_Chunk1x1.png",
+      "Residential_Kombini_1 - Quarter - Chunk1x1": "assets/tiles/Residential_Kombini_1_-_Quarter_-_Chunk1x1.png",
+      "Residential_Kombini_2 - Quarter - Chunk1x1": "assets/tiles/Residential_Kombini_2_-_Quarter_-_Chunk1x1.png",
+      "Suburban_1 - Quarter - Chunk1x1": "assets/tiles/Suburban_1_-_Quarter_-_Chunk1x1.png",
+      "Suburban_2 - Quarter - Chunk1x1": "assets/tiles/Suburban_2_-_Quarter_-_Chunk1x1.png",
+      "Suburban_3 - Quarter - Chunk1x1": "assets/tiles/Suburban_3_-_Quarter_-_Chunk1x1.png",
+      "Suburban_4 - Quarter - Chunk1x1": "assets/tiles/Suburban_4_-_Quarter_-_Chunk1x1.png",
+      "Suburban_5 - Quarter - Chunk1x1": "assets/tiles/Suburban_5_-_Quarter_-_Chunk1x1.png",
+      "Suburban_6 - Quarter - Chunk1x1": "assets/tiles/Suburban_6_-_Quarter_-_Chunk1x1.png",
+      "Suburban_7 - Quarter - Chunk1x1": "assets/tiles/Suburban_7_-_Quarter_-_Chunk1x1.png",
+      "Suburban_Sushi_1 - Quarter - Chunk1x1": "assets/tiles/Suburban_Sushi_1_-_Quarter_-_Chunk1x1.png",
+      "PARK - 3x3 [Streaming]": "assets/tiles/PARK_-_3x3_Streaming.png",
+      "StartChunk": "assets/tiles/StartChunk.png",
+    };
+
+    const TILE_WORLD = {
+      "POI - Art Gallery Shell": [60, 60],
+      "POI - Pool Shell": [60, 60],
+      "POI - Mall Shell": [180, 180],
+      "POI - University Shell": [180, 180],
+      "POI - Stadium Shell": [240, 240],
+      "City1 - Full - Chunk1x1": [51, 51],
+      "City10 - Full - Chunk1x1": [51, 51],
+      "City11 - Full - Chunk1x1": [51, 51],
+      "City2 - Full - Chunk1x1": [51, 51],
+      "City3 - Full - Chunk1x1": [51, 51],
+      "City4 - Full - Chunk1x1": [51, 51],
+      "City5 - Full - Chunk1x1": [51, 51],
+      "City6 - Full - Chunk1x1": [51, 51],
+      "City7 - Full - Chunk1x1": [51, 51],
+      "City8 - Full - Chunk1x1": [51, 51],
+      "City9 - Full - Chunk1x1": [51, 51],
+      "CityCross - Full - Chunk1x1": [51, 51],
+      "Suburban_Kombini - Full - Chunk1x1": [51, 51],
+      "City - Half - Chunk1x1": [25.5, 51],
+      "Residential_1 - Half - Chunk1x1": [25.5, 51],
+      "Residential_2 - Half - Chunk1x1": [25.5, 51],
+      "Residential_3 - Half - Chunk1x1": [25.5, 51],
+      "Residential_Kombini_1 - Half - Chunk1x1": [25.5, 51],
+      "Suburban_Subway_1 - Half - Chunk1x1": [25.5, 51],
+      "Suburban_Subway_2 - Half - Chunk1x1": [25.5, 51],
+      "Suburban_Subway_Closed_1 - Half - Chunk1x1": [25.5, 51],
+      "Suburban_Subway_Closed_2 - Half - Chunk1x1": [25.5, 51],
+      "Residential_1 - Quarter - Chunk1x1": [25.5, 25.5],
+      "Residential_2 - Quarter - Chunk1x1": [25.5, 25.5],
+      "Residential_3 - Quarter - Chunk1x1": [25.5, 25.5],
+      "Residential_4 - Quarter - Chunk1x1": [25.5, 25.5],
+      "Residential_5 - Quarter - Chunk1x1": [25.5, 25.5],
+      "Residential_6 - Quarter - Chunk1x1": [25.5, 25.5],
+      "Residential_Kombini_1 - Quarter - Chunk1x1": [25.5, 25.5],
+      "Residential_Kombini_2 - Quarter - Chunk1x1": [25.5, 25.5],
+      "Suburban_1 - Quarter - Chunk1x1": [25.5, 25.5],
+      "Suburban_2 - Quarter - Chunk1x1": [25.5, 25.5],
+      "Suburban_3 - Quarter - Chunk1x1": [25.5, 25.5],
+      "Suburban_4 - Quarter - Chunk1x1": [25.5, 25.5],
+      "Suburban_5 - Quarter - Chunk1x1": [25.5, 25.5],
+      "Suburban_6 - Quarter - Chunk1x1": [25.5, 25.5],
+      "Suburban_7 - Quarter - Chunk1x1": [25.5, 25.5],
+      "Suburban_Sushi_1 - Quarter - Chunk1x1": [25.5, 25.5],
+      "PARK - 3x3 [Streaming]": [171, 171],
+      "StartChunk": [51, 51],
+    };
+
+    // 第 12.5 节：数据里的地块名 → 图块 key 映射
+    function zoneNameToTileKey(zoneName) {
+      if (/^City\d+$/.test(zoneName)) return `${zoneName} - Full - Chunk1x1`;
+      if (zoneName === "Kombini" || zoneName === "Suburban_Kombini") return "Suburban_Kombini - Full - Chunk1x1";
+      if (zoneName === "Art Gallery") return "POI - Art Gallery Shell";
+      if (zoneName === "Pool") return "POI - Pool Shell";
+      if (/^Residential_[1-6]$/.test(zoneName)) return `${zoneName} - Quarter - Chunk1x1`;
+      if (zoneName === "Residential_2(Half)") return "Residential_2 - Half - Chunk1x1";
+      if (zoneName === "Residential_3(Half)") return "Residential_3 - Half - Chunk1x1";
+      if (/^Suburban_[1-7]$/.test(zoneName)) return `${zoneName} - Quarter - Chunk1x1`;
+      if (zoneName === "Suburban_Sushi_1") return "Suburban_Sushi_1 - Quarter - Chunk1x1";
+      if (zoneName === "Subway") return "Suburban_Subway_1 - Half - Chunk1x1";
+      if (zoneName === "Park 3x3") return "PARK - 3x3 [Streaming]";
+      if (zoneName === "University 3x3") return "POI - University Shell";
+      if (zoneName === "Mall 3x3") return "POI - Mall Shell";
+      if (zoneName === "Stadium 4x4") return "POI - Stadium Shell";
+      return zoneName;
+    }
+
+    const tileCache = {};
+    let loadedTileCount = 0;
+
+    function updateAssetStatus() {
+      const el = document.getElementById("st-assets");
+      if (loadedTileCount > 0) {
+        el.textContent = `贴图加载: ${loadedTileCount}/45 张已就绪`;
+      } else {
+        el.textContent = `贴图加载: 0/45 (工程蓝图兜底模式)`;
+      }
+    }
+
+    function getTile(key) {
+      if (key in tileCache) return tileCache[key];
+      const file = TILE_FILES[key];
+      if (!file) {
+        tileCache[key] = null;
+        return null;
+      }
+      const img = new Image();
+      img.onload = () => {
+        loadedTileCount++;
+        updateAssetStatus();
+        markDirty();
+      };
+      img.onerror = () => {
+        // 加载失败保持静默，绘制时自动降级为圆角矩形
+      };
+      img.src = file;
+      tileCache[key] = img;
+      return img;
+    }
+
+    // 预触发 StartChunk 检测
+    getTile("StartChunk");
+
+    // ============================================================================
+    // 2. 逐位复刻核心哈希与生成算法（严格按第 3 节实现，无 Math.random）
+    // ============================================================================
+    const imul = Math.imul;
+    const u32 = n => n >>> 0;
+
+    function hash(seed, x, y) {
+      let n = u32(seed);
+      n = u32(n ^ u32(imul(x, -1640531535)));
+      n = u32((n << 13) | (n >>> 19));
+      n = u32(imul(n, 1540483477));
+      n = u32(n ^ u32(imul(y, -2048144777)));
+      n = u32((n << 17) | (n >>> 15));
+      n = u32(imul(n, 2654435761));
+      n = u32(n ^ (n >>> 16));
+      n = u32(imul(n, 73244475));
+      return u32(n ^ (n >>> 16));
+    }
+
+    function advance(h) {
+      h = u32(h ^ (h >>> 16));
+      h = u32(imul(h, 73244475));
+      h = u32(h ^ (h >>> 16));
+      return h;
+    }
+
+    const hashToFloat = h => (h & 0xFFFFFF) / 16777216;
+    const floorDiv = (a, b) => Math.floor(a / b);
+
+    function weightedPick(items, weightKey, u01) {
+      let total = 0;
+      for (let i = 0; i < items.length; i++) total += items[i][weightKey];
+      let r = u01 * total;
+      for (let i = 0; i < items.length; i++) {
+        if (r < items[i][weightKey]) return items[i];
+        r -= items[i][weightKey];
+      }
+      return items[items.length - 1];
+    }
+
+    // 缓存容器（切换 seed 时清空）
+    let currentSeed = 123456789;
+    const biomeCache = new Map();
+    const initSubwayCache = new Map();
+    const cellResolveCache = new Map();
+
+    const specialCache = new Map();
+    function clearSeedCaches() {
+      if (typeof lastPlacement !== 'undefined') lastPlacement = null;
+      specialCache.clear();
+      biomeCache.clear();
+      initSubwayCache.clear();
+      cellResolveCache.clear();
+    }
+
+    // 3.2 街区（Biome）—— Voronoi 抖动网格
+    const DISTRICT_SIZE = 3;
+    function biomeForCell(x, y) {
+      if (x * x + y * y <= 4) return BIOMES[0]; // 出生点附近 x²+y²<=4 固定起始街区 Residential
+      const key = `${x},${y}`;
+      const cached = biomeCache.get(key);
+      if (cached !== undefined) return cached;
+
+      const d = Math.max(2, DISTRICT_SIZE);
+      const di = floorDiv(x, d);
+      const dj = floorDiv(y, d);
+      let best = Infinity;
+      let chosen = BIOMES[0];
+      const biomeSeed = u32(currentSeed ^ 0x9E3779B9);
+
+      for (let i = -1; i <= 1; i++) {
+        for (let j = -1; j <= 1; j++) {
+          const nx = di + i;
+          const ny = dj + j;
+          let h = hash(biomeSeed, nx, ny);
+          const cx = (nx + hashToFloat(h)) * d;
+          h = advance(h);
+          const cy = (ny + hashToFloat(h)) * d;
+          h = advance(h);
+          const dx = cx - x;
+          const dy = cy - y;
+          const dist2 = dx * dx + dy * dy;
+          if (dist2 < best) {
+            best = dist2;
+            chosen = weightedPick(BIOMES, "weight", hashToFloat(h));
+          }
+        }
+      }
+      biomeCache.set(key, chosen);
+      return chosen;
+    }
+
+    // 判断某格在未考虑间距前是否抽中地铁
+    
+
+    // 根据槽位与池抽选地块（3.6 节：同一区块内不重复）
+    function resolveZonesForChunk(chunkDef, h, excludeSpecial = false, biomeName = null) {
+      const used = new Set();
+      const pickedZones = [];
+      let curH = h;
+
+      const set = biomeName ? (BIOME_ZONE_SETS[biomeName] || null) : null;
+      const fbName = biomeName ? BIOME_FALLBACK[biomeName] : null;
+      const fbSet = fbName ? (BIOME_ZONE_SETS[fbName] || null) : null;
+
+      function candidates(slotType, zoneSet, ignoreUsed, excludeSp) {
+        return chunkDef.pool.filter(z =>
+          z.occ === slotType &&
+          !(excludeSp && z.poi) &&
+          (!zoneSet || zoneSet.indexOf(canonZoneName(z.n)) >= 0) &&
+          (ignoreUsed || !used.has(z.n))
+        );
+      }
+
+      // 六级回退链（occupancy 始终是硬条件）
+      function pickZone(slotType, hh, excludeSp) {
+        let c = candidates(slotType, set, false, excludeSp);
+        if (!c.length) c = candidates(slotType, fbSet, false, excludeSp);
+        if (!c.length) c = candidates(slotType, set, true, excludeSp);
+        if (!c.length) c = candidates(slotType, fbSet, true, excludeSp);
+        if (!c.length) c = candidates(slotType, null, false, excludeSp);
+        if (!c.length) c = candidates(slotType, null, true, excludeSp);
+        if (!c.length) return null;
+        return weightedPick(c, "w", hashToFloat(hh));
+      }
+
+      for (let s = 0; s < chunkDef.slots.length; s++) {
+        const slotType = chunkDef.slots[s];
+        curH = advance(curH);
+
+        let chosenZone = pickZone(slotType, curH, excludeSpecial);
+
+        // 便利店门禁：被拒后「重走完整回退链」并排除特殊地块（不是只筛当前候选）
+        if (chosenZone && !excludeSpecial && chosenZone.poi === "Kombini"
+            && (advance(u32(curH ^ 0xC2B2AE35)) % 3) !== 0) {
+          const retry = pickZone(slotType, curH, true);
+          if (retry) chosenZone = retry;
+        }
+
+        if (!chosenZone) chosenZone = chunkDef.pool[0];   // 兜底，绝不返回空
+        if (!chosenZone) break;
+        used.add(chosenZone.n);
+        pickedZones.push({
+          slot: slotType,
+          name: chosenZone.n,
+          poi: chosenZone.poi || null,
+          tileKey: zoneNameToTileKey(chosenZone.n)
+        });
+      }
+      return pickedZones;
+    }
+
+    // 3.3 + 3.4 + 3.6 单格解析
+    function computeRaw(x, y) {
+      const cacheKey = `${x},${y}`;
+      const cached = cellResolveCache.get(cacheKey);
+      if (cached !== undefined) return cached;
+
+      const h0 = hash(currentSeed, x, y);
+      const biome = biomeForCell(x, y);
+      const bn = biome.name;
+
+      let chunkDef = selectChunk(h0, bn);
+      chunkDef = enforceSubwaySpacing(x, y, h0, chunkDef, bn);
+
+      const zones = resolveZonesForChunk(chunkDef, advance(h0), false, bn);
+      const rotation = (advance(h0) % 4) * 90;
+      const result = {
+        chunkDef, gw: chunkDef.gw, gh: chunkDef.gh, rotation,
+        subwayReplaced: false, zones,
+        primaryPoi: (zones.find(z => z && z.poi) || {}).poi || null,
+        biome
+      };
+      cellResolveCache.set(cacheKey, result);
+      return result;
+    }
+
+    // ---- 特殊地块（POI）间距：落败者降级为普通地块 ----
+    
+
+    
+
+    
+
+    // 两个区块足迹之间的空隙是否都 ≤ 2 格
+    
+
+    
+
+    function resolveCell(x, y, forceSmall) {
+      const key = `${x},${y}`;
+      if (actualCells.has(key)) return resolvedFromActual(actualCells.get(key), x, y);
+      if (specialCache.has(key)) return specialCache.get(key);
+
+      let result = computeEntry(x, y);
+      if (selectionContainsSpecial(result) && !specialCandidateWins(x, y, result)) {
+        result = buildNonSpecialReplacement(x, y, result);
+      }
+      // Classic 0~4 级：抽到被禁 POI → 重抽（永远特殊区块会变成空块）
+      if (showClassicRestrict && result.zones.some(z => z && z.poi && !classicPoiAllowed(z.poi))) {
+        const bn = result.biome ? result.biome.name : null;
+        if (isAlwaysSpecialChunk(result.chunkDef)) {
+          result = Object.assign({}, result, { zones: [], primaryPoi: null, blockedByRestriction: true });
+        } else {
+          const h0 = hash(currentSeed, x, y);
+          const zones = resolveZonesForChunk(result.chunkDef, advance(h0), true, bn);
+          result = Object.assign({}, result, {
+            zones,
+            primaryPoi: (zones.find(z => z && z.poi) || {}).poi || null,
+            poiDowngraded: true
+          });
+        }
+      }
+
+      if (forceSmall && (result.gw > 1 || result.gh > 1)) {
+        const h0 = hash(currentSeed, x, y);
+        const fb = selectSmallFallbackChunk(h0, result.biome.name, result.chunkDef, false);
+        if (fb) {
+          const zones = resolveZonesForChunk(fb, advance(h0), false, result.biome.name);
+          result = { chunkDef: fb, gw: fb.gw, gh: fb.gh, rotation: (advance(h0) % 4) * 90,
+                     zones, primaryPoi: (zones.find(z => z && z.poi) || {}).poi || null, biome: result.biome };
+        }
+      }
+      specialCache.set(key, result);
+      return result;
+    }
+
+    /* ============ 忠实移植：区块选择 + 地铁间距 + 特殊间距 ============ */
+    function isSubwayChunk(c){ return c.name === "Subway"; }
+    function isAlwaysSpecialChunk(c){
+      if (c.name === "Subway") return true;
+      if (!c.pool || !c.pool.length) return false;
+      for (const z of c.pool) if (!z.poi) return false;
+      return true;
+    }
+    function specialPriority(x, y){ return hash(u32(currentSeed ^ -1255572915), x, y); }
+    function subwayPriority(x, y){ return hash(u32(currentSeed ^ 0x6D2B79F5), x, y); }
+    function comesBefore(a, b){ return a.x < b.x || (a.x === b.x && a.y < b.y); }
+    function isMultiCell(s){ return s[0] > 1 || s[1] > 1; }
+
+    function pickChunkWeighted(list, u, bn){
+      let total = 0; for (const c of list) total += chunkWeightFor(c, bn);
+      let r = u * total;
+      for (const c of list){ const w = chunkWeightFor(c, bn); if (r < w) return c; r -= w; }
+      return list[list.length - 1];
+    }
+    function selectChunk(hRaw, bn){
+      const h = advance(hRaw);
+      const small = activeSmallChunks(), large = activeLargeChunks();
+      let sW = 0, lW = 0;
+      for (const c of small) sW += chunkWeightFor(c, bn);
+      for (const c of large) lW += chunkWeightFor(c, bn);
+      if (hashToFloat(hRaw) * (sW + lW) < sW) return pickChunkWeighted(small, hashToFloat(h), bn);
+      return pickChunkWeighted(large, hashToFloat(h), bn);
+    }
+    function selectBaseChunkForSpacing(x, y){ return selectChunk(hash(currentSeed, x, y), biomeForCell(x, y).name); }
+    function selectNonSubwayReplacement(rejected, h, bn){
+      const list = (rejected.gw <= 1 && rejected.gh <= 1) ? activeSmallChunks() : activeLargeChunks();
+      const cands = list.filter(c => !isSubwayChunk(c));
+      return pickChunkWeighted(cands, hashToFloat(h), bn);
+    }
+    function enforceSubwaySpacing(x, y, selectionHash, selected, bn){
+      if (!isSubwayChunk(selected)) return selected;
+      const p1 = subwayPriority(x, y);
+      for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++){
+        if (!i && !j) continue;
+        const nx = x + i, ny = y + j;
+        if (isSubwayChunk(selectBaseChunkForSpacing(nx, ny))){
+          const p2 = subwayPriority(nx, ny);
+          if (p2 > p1 || (p2 === p1 && comesBefore({x:nx, y:ny}, {x, y})))
+            return selectNonSubwayReplacement(selected, advance(u32(selectionHash ^ 0xA511E9B3)), bn);
+        }
+      }
+      return selected;
+    }
+    function computeEntry(x, y){
+      const h0 = hash(currentSeed, x, y);
+      const biome = biomeForCell(x, y);
+      const bn = biome.name;
+      let chunkDef = selectChunk(h0, bn);
+      chunkDef = enforceSubwaySpacing(x, y, h0, chunkDef, bn);
+      const zones = resolveZonesForChunk(chunkDef, advance(h0), false, bn);
+      const rotation = (advance(h0) % 4) * 90;
+      return { chunkDef, gw: chunkDef.gw, gh: chunkDef.gh, rotation, zones,
+               primaryPoi: (zones.find(z => z && z.poi) || {}).poi || null, biome };
+    }
+    function selectionContainsSpecial(e){
+      if (isAlwaysSpecialChunk(e.chunkDef)) return true;
+      return e.zones.some(z => z && z.poi);
+    }
+    function fpWithinSpacing(a, aw, ah, b, bw, bh){
+      const ax1 = a.x + aw - 1, ay1 = a.y + ah - 1, bx1 = b.x + bw - 1, by1 = b.y + bh - 1;
+      const gx = ax1 < b.x ? b.x - ax1 : (bx1 < a.x ? a.x - bx1 : 0);
+      const gy = ay1 < b.y ? b.y - ay1 : (by1 < a.y ? a.y - by1 : 0);
+      return gx <= 2 && gy <= 2;
+    }
+    function fpOverlap(a, aw, ah, b, bw, bh){
+      const ax1 = a.x + aw - 1, ay1 = a.y + ah - 1, bx1 = b.x + bw - 1, by1 = b.y + bh - 1;
+      return a.x <= bx1 && b.x <= ax1 && a.y <= by1 && b.y <= ay1;
+    }
+    function selectSmallFallbackChunk(h, bn, excluded, excludeSpecial){
+      const cands = activeSmallChunks().filter(c => c !== excluded && (!excludeSpecial || !isAlwaysSpecialChunk(c)));
+      if (!cands.length) return null;
+      return pickChunkWeighted(cands, hashToFloat(advance(u32(h ^ 0x94D049BB))), bn);
+    }
+    function specialCandidateWins(x, y, entry){
+      const size = [entry.chunkDef.gw, entry.chunkDef.gh];
+      const flag = isMultiCell(size);
+      const mine = specialPriority(x, y);
+      const maxLW = 4, maxLH = 4;
+      for (let i = -(maxLW - 1 + 2); i <= (size[0] - 1 + 2); i++){
+        for (let j = -(maxLH - 1 + 2); j <= (size[1] - 1 + 2); j++){
+          if (!i && !j) continue;
+          const nx = x + i, ny = y + j;
+          const pn = specialPriority(nx, ny);
+          const flag2 = pn > mine || (pn === mine && comesBefore({x:nx, y:ny}, {x, y}));
+          if (!flag2 && (flag || i > 0 || j > 0 || i < -(maxLW - 1) || j < -(maxLH - 1))) continue;
+          const nb = computeEntry(nx, ny);
+          if (!selectionContainsSpecial(nb)) continue;
+          const size2 = [nb.chunkDef.gw, nb.chunkDef.gh];
+          const flag3 = isMultiCell(size2);
+          if (!fpWithinSpacing({x, y}, size[0], size[1], {x:nx, y:ny}, size2[0], size2[1])) continue;
+          if (fpOverlap({x, y}, size[0], size[1], {x:nx, y:ny}, size2[0], size2[1]) && flag !== flag3){
+            if (flag3) return false;
+          } else if (flag2) return false;
+        }
+      }
+      return true;
+    }
+    function buildNonSpecialReplacement(x, y, entry){
+      const chunk = entry.chunkDef, bn = entry.biome.name;
+      if (!isAlwaysSpecialChunk(chunk)){
+        const h0 = hash(currentSeed, x, y);
+        const zones = resolveZonesForChunk(chunk, advance(h0), true, bn);
+        return { chunkDef: chunk, gw: chunk.gw, gh: chunk.gh, rotation: (advance(h0) % 4) * 90, zones,
+                 primaryPoi: (zones.find(z => z && z.poi) || {}).poi || null, biome: entry.biome, poiDowngraded: true };
+      }
+      const h2 = hash(u32(currentSeed ^ -776648139), x, y);
+      const fb = selectSmallFallbackChunk(h2, bn, chunk, true);
+      if (!fb) return entry;
+      const zones = resolveZonesForChunk(fb, advance(h2), true, bn);
+      return { chunkDef: fb, gw: fb.gw, gh: fb.gh, rotation: (advance(h2) % 4) * 90, zones,
+               primaryPoi: (zones.find(z => z && z.poi) || {}).poi || null, biome: entry.biome, poiDowngraded: true };
+    }
+
+    // 3.5 区域放置计算（按到原点距离升序排序，距离相同按 y、x，避免大区块重叠）
+    function buildVisiblePlacement(minX, maxX, minY, maxY) {
+      const pad = 4; // 外扩 4 格
+      const x0 = minX - pad;
+      const x1 = maxX + pad;
+      const y0 = minY - pad;
+      const y1 = maxY + pad;
+
+      const cells = [];
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          cells.push({ x, y, d2: x * x + y * y });
+        }
+      }
+
+      cells.sort((a, b) => {
+        if (a.d2 !== b.d2) return a.d2 - b.d2;
+        if (a.y !== b.y) return a.y - b.y;
+        return a.x - b.x;
+      });
+
+      const occ = new Map();
+      const items = [];
+
+      for (let idx = 0; idx < cells.length; idx++) {
+        const c = cells[idx];
+        const key = `${c.x},${c.y}`;
+        if (occ.has(key)) continue;
+
+        let resolved = resolveCell(c.x, c.y, false);
+
+        // 若是 3x3 / 4x4 大区块，检查其覆盖格是否已被更靠近原点的区块占用，保证绝不重叠
+        if (resolved.gw > 1 || resolved.gh > 1) {
+          let collision = false;
+          for (let i = 0; i < resolved.gw && !collision; i++) {
+            for (let j = 0; j < resolved.gh; j++) {
+              const subKey = `${c.x + i},${c.y + j}`;
+              if (occ.has(subKey)) {
+                collision = true;
+                break;
+              }
+            }
+          }
+          if (collision) {
+            resolved = resolveCell(c.x, c.y, true);
+          }
+        }
+
+        const item = {
+          anchorX: c.x,
+          anchorY: c.y,
+          gw: resolved.gw,
+          gh: resolved.gh,
+          resolved,
+          droughtSim: droughtKindFor(c.x, c.y, resolved)
+        };
+        items.push(item);
+
+        for (let i = 0; i < resolved.gw; i++) {
+          for (let j = 0; j < resolved.gh; j++) {
+            occ.set(`${c.x + i},${c.y + j}`, item);
+          }
+        }
+      }
+
+      return { occ, items };
+    }
+
+    // ============================================================================
+    // 3. 画布状态、尺寸防抖与渲染管线（严格遵循第 6、8、10、12 节）
+    // ============================================================================
+    const cv = document.getElementById("map-canvas");
+    const ctx = cv.getContext("2d");
+    const hostEl = document.getElementById("main");
+
+    let camX = 0;          // 视野中心格坐标 X（可为小数）
+    let camY = 0;          // 视野中心格坐标 Y（可为小数）
+    let cellPx = 36;       // 每格像素数 (10 ~ 90)
+    let dirty = true;
+
+    let poiOnlyMode = false;
+    let showSubwayRing = true;
+    let showBiomeTint = false;
+    let showMinimapRing = false;
+    let showDroughtSim = false;
+    let activePoiFilter = null;
+
+    // 干旱补偿近似模拟：节奏命中 + 附近无特殊 → 标记一个可能被强插的 POI
+    function droughtKindFor(x, y, resolved) {
+      if (!showDroughtSim) return null;
+      if (selectionContainsSpecial(resolved)) return null;
+      if ((Math.abs(x) + Math.abs(y)) % 4 !== 0) return null;
+      for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) {
+        if (!i && !j) continue;
+        if (selectionContainsSpecial(computeEntry(x + i, y + j))) return null;
+      }
+      return ["Kombini", "Pool", "ArtGallery"][Math.abs(x + y) % 3];
+    }
+
+    // ===== 地图实际结果同步（插件 → 查看器） =====
+    let actualCells = new Map();      // "x,y" -> {x,y,c,w,h,r,z}
+    let actualVersion = 0;
+    let actualSeed = 0;
+    let syncLive = false;
+    let syncTimer = null;
+    let playerCell = null;
+    let followPlayer = true;
+    let showClassicRestrict = false;
+
+    // Classic 0~4 级的 POI 白名单（RankPoiPolicy）
+    function classicPoiAllowed(poi) {
+      return !poi || poi === "Kombini" || poi === "ArtGallery" || poi === "University" || poi === "Stadium";
+    }
+    function activeSmallChunks() {
+      return showClassicRestrict ? SMALL_CHUNKS.filter(c => !isSubwayChunk(c)) : SMALL_CHUNKS;
+    }
+    function activeLargeChunks() { return LARGE_CHUNKS; }
+
+    const CHUNK_SLOTS = {
+      "Mono 1x1": ["Full"], "X 1x1": ["Quarter"], "T 1x1": ["Half"],
+      "Subway": ["Half"], "Mono 3x3": ["Full"], "Mono 4x4": ["Full"]
+    };
+
+    function actualZoneShort(n) {
+      if (!n) return "-";
+      const s = String(n);
+      if (/Pool Shell/i.test(s)) return "Pool";
+      if (/Art Gallery Shell/i.test(s)) return "Art Gallery";
+      if (/Mall Shell/i.test(s)) return "Mall 3x3";
+      if (/University Shell/i.test(s)) return "University 3x3";
+      if (/Stadium Shell/i.test(s)) return "Stadium 4x4";
+      if (/PARK\s*-\s*3x3/i.test(s)) return "Park 3x3";
+      if (/Kombini/i.test(s)) return "Kombini";
+      if (/Subway/i.test(s)) return "Subway";
+      let m = s.match(/^(City\d+)/); if (m) return m[1];
+      m = s.match(/^(Residential_[1-6])/); if (m) return /Half/i.test(s) ? m[1] + "(Half)" : m[1];
+      m = s.match(/^(Suburban_[1-7])/); if (m) return m[1];
+      if (/Suburban_Sushi_1/i.test(s)) return "Suburban_Sushi_1";
+      return s.replace(/\s*-\s*(Full|Half|Quarter)\s*-\s*Chunk\d+x\d+$/i, "")
+              .replace(/\s*-\s*\d+x\d+$/i, "").replace(/\s*-\s*Chunk\d+x\d+$/i, "").trim();
+    }
+
+    function shortToPoi(n) {
+      if (n === "Kombini") return "Kombini";
+      if (n === "Pool") return "Pool";
+      if (n === "Art Gallery") return "ArtGallery";
+      if (n === "Subway") return "Subway";
+      if (n === "Mall 3x3") return "Mall";
+      if (n === "University 3x3") return "University";
+      if (n === "Park 3x3") return "Park";
+      if (n === "Stadium 4x4") return "Stadium";
+      return null;
+    }
+
+    function chunkShortName(gameName) {
+      const s = String(gameName || "");
+      if (/Subway/i.test(s)) return "Subway";
+      const m = s.match(/(Mono|X|T)ChunkData\s*-\s*(\d)x(\d)/i);
+      if (m) {
+        const kind = m[1].toLowerCase();
+        const gx = parseInt(m[2], 10), gy = parseInt(m[3], 10);
+        if (gx > 1 || gy > 1) return `Mono ${gx}x${gy}`;
+        if (kind === "mono") return "Mono 1x1";
+        return kind === "x" ? "X 1x1" : "T 1x1";
+      }
+      return "Mono 1x1";
+    }
+
+    function resolvedFromActual(a, x, y) {
+      const name = chunkShortName(a.c);
+      const gw = Math.max(1, a.w | 0), gh = Math.max(1, a.h | 0);
+      const zones = (a.z || []).map(full => {
+        const short = actualZoneShort(full);
+        return { name: short, poi: shortToPoi(short), tileKey: zoneNameToTileKey(short), fullName: full };
+      });
+      // 槽位数量兜底：X=4，T/Subway=3，其余=1
+      const needSlots = name === "X 1x1" ? 4 : (name === "T 1x1" || name === "Subway" ? 3 : 1);
+      while (zones.length < needSlots) zones.push({ name: "-", poi: null, tileKey: "-", fullName: "-" });
+      const chunkDef = { name, gw, gh, slots: CHUNK_SLOTS[name] || ["Full"], pool: [] };
+      return {
+        chunkDef, gw, gh, rotation: ((a.r | 0) <= 3 ? (a.r | 0) * 90 : (a.r | 0)), zones,
+        primaryPoi: (zones.find(z => z.poi) || {}).poi || null,
+        biome: biomeForCell(x, y),
+        fromGame: true
+      };
+    }
+
+    function mergeActual(data) {
+      if (!data) return false;
+      if (data.seed) {
+        if (actualSeed && data.seed !== actualSeed) {          // 换局：清掉上一局的数据
+          actualCells.clear();
+          actualVersion = 0;
+          playerCell = null;
+        }
+        actualSeed = data.seed;
+        if (currentSeed !== data.seed) applySeed(data.seed);   // 自动填种子并应用
+      }
+      let added = 0;
+      if (Array.isArray(data.cells)) {
+        for (const c of data.cells) {
+          const k = `${c.x},${c.y}`;
+          if (!actualCells.has(k)) added++;
+          actualCells.set(k, c);
+        }
+      }
+      if (data.v != null) actualVersion = data.v;
+      if (Array.isArray(data.p)) {
+        const px = data.p[0] | 0, py = data.p[1] | 0;
+        if (!playerCell || playerCell.x !== px || playerCell.y !== py) {
+          playerCell = { x: px, y: py };
+          if (followPlayer) { camX = px; camY = py; }
+          dirty = true;
+        }
+      }
+      if (added > 0) { lastPlacement = null; dirty = true; }
+      return true;
+    }
+
+    function updateSyncStatus(extra) {
+      const el = document.getElementById("sync-status");
+      if (!el) return;
+      const n = actualCells.size;
+      let txt = `同步: ${syncLive ? "已连接" : "未连接"} · 实测 ${n} 格`;
+      if (actualSeed && currentSeed && actualSeed !== currentSeed) {
+        txt += ` · ⚠ 同步种子 ${actualSeed} 与当前 ${currentSeed} 不同`;
+      }
+      if (extra) txt += " · " + extra;
+      el.textContent = txt;
+    }
+
+    async function pollSync() {
+      if (!syncLive) return;
+      try {
+        const r = await fetch(`/map.json?v=${actualVersion}`, { cache: "no-store" });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const d = await r.json();
+        if (d.v === actualVersion && (!d.cells || d.cells.length === 0)) { updateSyncStatus(); return; }
+        mergeActual(d);
+        updateSyncStatus();
+      } catch (e) {
+        syncLive = false;
+        updateSyncStatus("连接失败");
+      }
+    }
+
+    function startSync() {
+      if (location.protocol !== "http:" && location.protocol !== "https:") {
+        updateSyncStatus("需通过插件打开，或点「加载实际结果」");
+        return;
+      }
+      syncLive = true;
+      updateSyncStatus();
+      if (syncTimer) clearInterval(syncTimer);
+      syncTimer = setInterval(pollSync, 500);
+      pollSync();
+    }
+
+    function loadActualFile(file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const d = JSON.parse(String(reader.result));
+          if (mergeActual(d)) updateSyncStatus("已加载文件");
+          else updateSyncStatus("文件格式不正确");
+        } catch (e) { updateSyncStatus("解析失败"); }
+      };
+      reader.readAsText(file);
+    }
+ // 点击右侧某个 POI 时单独高亮
+
+    let lastPlacement = { occ: new Map(), items: [] };
+    let hoverCell = null;
+
+    function markDirty() {
+      dirty = true;
+    }
+
+    // 第 8.1 节：避免 canvas 尺寸反馈循环的正确做法
+    function ensureSize() {
+      const w = Math.min(4096, hostEl.clientWidth);
+      const h = Math.min(4096, hostEl.clientHeight);
+      const dpr = window.devicePixelRatio || 1;
+      const bw = Math.round(w * dpr);
+      const bh = Math.round(h * dpr);
+      if (cv.width !== bw || cv.height !== bh) {
+        cv.width = bw;
+        cv.height = bh;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        dirty = true;
+      }
+      return { w, h };
+    }
+
+    // 格坐标 <-> 屏幕像素坐标转换（以格中心为整数坐标点，X向右，Y向下）
+    // 游戏坐标系 Y 向上（+Y 对应世界 +Z），屏幕 y 向下，所以要取反
+    function cellToScreen(cx, cy, viewW, viewH) {
+      return {
+        sx: viewW * 0.5 + (cx - camX) * cellPx,
+        sy: viewH * 0.5 - (cy - camY) * cellPx
+      };
+    }
+
+    function screenToCell(sx, sy, viewW, viewH) {
+      const gx = camX + (sx - viewW * 0.5) / cellPx;
+      const gy = camY - (sy - viewH * 0.5) / cellPx;
+      return {
+        gx,
+        gy,
+        cx: Math.round(gx),
+        cy: Math.round(gy)
+      };
+    }
+
+    // 圆角矩形辅助函数
+    function fillRoundRect(ctx, x, y, w, h, r) {
+      const radius = Math.min(r, w * 0.5, h * 0.5);
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.arcTo(x + w, y, x + w, y + h, radius);
+      ctx.arcTo(x + w, y + h, x, y + h, radius);
+      ctx.arcTo(x, y + h, x, y, radius);
+      ctx.arcTo(x, y, x + w, y, radius);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // 在指定槽位绘制真实贴图或工程蓝图圆角块兜底（第 6 节 + 第 12.4 节）
+    function drawSlotTileOrFallback(ctx, tileKey, slotOffsetX, slotOffsetY, worldW, worldH, detailLevel) {
+      const wPx = (worldW / 60) * cellPx;
+      const hPx = (worldH / 60) * cellPx;
+      const x = slotOffsetX - wPx * 0.5;
+      const y = slotOffsetY - hPx * 0.5;
+
+      // 道路色内边框：盖住贴图边缘，块与块之间就形成街道
+      function strokeRoadEdge(rx, ry, rw, rh) {
+        const lw = Math.max(1.5, cellPx * 0.035);
+        ctx.save();
+        ctx.strokeStyle = "#4f5f5f";
+        ctx.lineWidth = lw;
+        ctx.strokeRect(rx + lw * 0.5, ry + lw * 0.5, rw - lw, rh - lw);
+        if (cellPx >= 18) {
+          ctx.strokeStyle = "rgba(28,35,45,0.55)";
+          ctx.lineWidth = Math.max(0.6, lw * 0.35);
+          const o = lw * 0.55;
+          ctx.strokeRect(rx + o, ry + o, rw - o * 2, rh - o * 2);
+        }
+        ctx.restore();
+      }
+
+      const img = getTile(tileKey);
+      if (img && img.complete && img.naturalWidth > 0) {
+        ctx.drawImage(img, x, y, wPx, hPx);
+        strokeRoadEdge(x, y, wPx, hPx);
+        return true;
+      }
+
+      // 降级方案：浅灰/米白圆角底块 (#d8d4c6) + 内部深色建筑块 (#2a3038) + 细白描边 (#cfd6d0)
+      ctx.fillStyle = "#d8d4c6";
+      fillRoundRect(ctx, x, y, wPx, hPx, Math.max(1.5, cellPx * 0.06));
+
+      if (detailLevel) {
+        const insetX = wPx * 0.10;
+        const insetY = hPx * 0.10;
+        const bx = x + insetX;
+        const by = y + insetY;
+        const bw = Math.max(2, wPx - insetX * 2);
+        const bh = Math.max(2, hPx - insetY * 2);
+
+        ctx.fillStyle = "#2a3038";
+        ctx.fillRect(bx, by, bw, bh);
+
+        ctx.strokeStyle = "#cfd6d0";
+        ctx.lineWidth = Math.max(0.8, Math.min(1.5, cellPx / 28));
+        ctx.strokeRect(bx, by, bw, bh);
+      }
+      strokeRoadEdge(x, y, wPx, hPx);
+      return false;
+    }
+
+    // 主渲染函数
+    function render() {
+      const { w: viewW, h: viewH } = ensureSize();
+      if (!dirty) return;
+      dirty = false;
+
+      // 10.4.6 缩放 < 14px/格时按最近邻降采样并停止内部过细描边
+      const detailLevel = cellPx >= 14;
+      ctx.imageSmoothingEnabled = cellPx >= 14;
+
+      // 1. 铺底色 #4f5f5f（街道/地面）
+      ctx.fillStyle = "#4f5f5f";
+      ctx.fillRect(0, 0, viewW, viewH);
+
+      // 计算当前可见格范围并限制最大格数 <= 120000（第 8.3 节）
+      let halfCols = Math.ceil((viewW * 0.5) / cellPx) + 1;
+      let halfRows = Math.ceil((viewH * 0.5) / cellPx) + 1;
+      const totalEst = (halfCols * 2 + 9) * (halfRows * 2 + 9);
+      if (totalEst > 120000) {
+        const scaleDown = Math.sqrt(120000 / totalEst);
+        halfCols = Math.floor(halfCols * scaleDown);
+        halfRows = Math.floor(halfRows * scaleDown);
+      }
+
+      const centerCellX = Math.round(camX);
+      const centerCellY = Math.round(camY);
+      const minX = centerCellX - halfCols;
+      const maxX = centerCellX + halfCols;
+      const minY = centerCellY - halfRows;
+      const maxY = centerCellY + halfRows;
+
+      const visibleCount = (maxX - minX + 1) * (maxY - minY + 1);
+      document.getElementById("st-visible").textContent = visibleCount.toLocaleString();
+      document.getElementById("st-zoom").textContent = `${Math.round(cellPx)} px/格`;
+
+      const viewKey = `${minX},${maxX},${minY},${maxY}`;
+      let placement = lastPlacement;
+      if (!placement || placement.__key !== viewKey) {
+        placement = buildVisiblePlacement(minX, maxX, minY, maxY);
+        placement.__key = viewKey;
+        lastPlacement = placement;
+      }
+
+      // 可选：街区底色染色
+      if (showBiomeTint) {
+        ctx.save();
+        ctx.globalAlpha = 0.38;
+        for (let y = minY; y <= maxY; y++) {
+          for (let x = minX; x <= maxX; x++) {
+            const b = biomeForCell(x, y);
+            const { sx, sy } = cellToScreen(x, y, viewW, viewH);
+            ctx.fillStyle = b.tint;
+            ctx.fillRect(sx - cellPx * 0.5, sy - cellPx * 0.5, cellPx, cellPx);
+          }
+        }
+        ctx.restore();
+      }
+
+      // 2. 绘制每个已放置区块
+      const subwayItems = [];
+
+      for (let idx = 0; idx < placement.items.length; idx++) {
+        const item = placement.items[idx];
+        const { anchorX, anchorY, gw, gh, resolved } = item;
+
+        // 粗略视口裁剪
+        if (
+          anchorX + gw - 1 < minX - 1 ||
+          anchorX > maxX + 1 ||
+          anchorY + gh - 1 < minY - 1 ||
+          anchorY > maxY + 1
+        ) {
+          continue;
+        }
+
+        // 计算区块几何中心对应的格坐标（1x1 在 anchorX, anchorY；3x3 在 anchorX+1, anchorY+1；4x4 在 anchorX+1.5, anchorY+1.5）
+        const centerGX = anchorX + (gw - 1) * 0.5;
+        const centerGY = anchorY + (gh - 1) * 0.5;
+        const { sx: chunkCX, sy: chunkCY } = cellToScreen(centerGX, centerGY, viewW, viewH);
+
+        const poiKey = resolved.primaryPoi;
+        if (resolved.chunkDef.name === "Subway") {
+          subwayItems.push({ cx: chunkCX, cy: chunkCY, anchorX, anchorY });
+        }
+
+        // 判断是否需要淡化（只看 POI 模式 或 选定了特定 POI 过滤器）
+        let isDimmed = false;
+        if (poiOnlyMode && !poiKey) isDimmed = true;
+        if (activePoiFilter && poiKey !== activePoiFilter) isDimmed = true;
+
+        ctx.save();
+        if (isDimmed) {
+          ctx.globalAlpha = 0.22;
+        }
+
+        ctx.translate(chunkCX, chunkCY);
+        ctx.rotate((resolved.rotation * Math.PI) / 180);
+
+        const isSpawnCell = (anchorX === 0 && anchorY === 0 && gw === 1 && gh === 1);
+        const startImg = isSpawnCell ? getTile("StartChunk") : null;
+
+        if (isSpawnCell && startImg && startImg.complete && startImg.naturalWidth > 0) {
+          // 10.4.4 / 12.4 出生点（0,0）如果正好有 StartChunk，优先用它
+          drawSlotTileOrFallback(ctx, "StartChunk", 0, 0, 51, 51, detailLevel);
+        } else if (resolved.slots || resolved.zones) {
+          const zones = resolved.zones;
+          const cName = resolved.chunkDef.name;
+
+          if (cName === "Mono 1x1" || cName === "Mono 3x3" || cName === "Mono 4x4") {
+            const z0 = zones && zones[0];
+            if (z0) {
+              const [wMeters, hMeters] = TILE_WORLD[z0.tileKey] || [51 * gw, 51 * gh];
+              drawSlotTileOrFallback(ctx, z0.tileKey, 0, 0, wMeters, hMeters, detailLevel);
+            }
+          } else if (cName === "X 1x1") {
+            // 4 个 Quarter 槽位 (2x2)，每个 25.5 x 25.5 米，中心偏移 ±12.75 米
+            const off = (12.75 / 60) * cellPx;
+            // 槽位位置来自区块 prefab 的 Base 子物体（实测坐标，单位米）：
+            //   槽0 ( 2.5,  2.5) 右-上    槽1 (-2.5, -2.5) 左-下
+            //   槽2 (-2.5,  2.5) 左-上    槽3 ( 2.5, -2.5) 右-下
+            const coords = [
+              [ off, -off],   // 槽0 右-上
+              [-off,  off],   // 槽1 左-下
+              [-off, -off],   // 槽2 左-上
+              [ off,  off]    // 槽3 右-下
+            ];
+            for (let s = 0; s < 4; s++) {
+              const z = zones[s];
+              const [wM, hM] = TILE_WORLD[z.tileKey] || [25.5, 25.5];
+              drawSlotTileOrFallback(ctx, z.tileKey, coords[s][0], coords[s][1], wM, hM, detailLevel);
+            }
+          } else if (cName === "T 1x1" || cName === "Subway") {
+            // Half (25.5 x 51 米) + 2 个 Quarter (25.5 x 25.5 米)，拼成完整 51 x 51 米方块
+            const off = (12.75 / 60) * cellPx;
+            const zHalf = zones[0];
+            const [hwM, hhM] = TILE_WORLD[zHalf.tileKey] || [25.5, 51];
+            drawSlotTileOrFallback(ctx, zHalf.tileKey, -off, 0, hwM, hhM, detailLevel);
+
+            const zQ1 = zones[1];
+            const [q1w, q1h] = TILE_WORLD[zQ1.tileKey] || [25.5, 25.5];
+            drawSlotTileOrFallback(ctx, zQ1.tileKey, off, -off, q1w, q1h, detailLevel);
+
+            const zQ2 = zones[2];
+            const [q2w, q2h] = TILE_WORLD[zQ2.tileKey] || [25.5, 25.5];
+            drawSlotTileOrFallback(ctx, zQ2.tileKey, off, off, q2w, q2h, detailLevel);
+          }
+        }
+
+        ctx.restore();
+
+        // 3. POI 标记（彩色描边 + 中文单字角标，第 6 节）
+        if (poiKey && POI_META[poiKey]) {
+          const meta = POI_META[poiKey];
+          const boxW = (gw * 51 / 60) * cellPx;
+          const boxH = (gh * 51 / 60) * cellPx;
+
+          ctx.save();
+          if (isDimmed) ctx.globalAlpha = 0.25;
+
+          ctx.strokeStyle = meta.color;
+          ctx.lineWidth = Math.max(2, cellPx * 0.07);
+          ctx.strokeRect(chunkCX - boxW * 0.5, chunkCY - boxH * 0.5, boxW, boxH);
+
+          // 中文单字徽章
+          const badgeR = Math.max(8, Math.min(16, cellPx * 0.28 * Math.sqrt(gw)));
+          ctx.fillStyle = meta.color;
+          ctx.beginPath();
+          ctx.arc(chunkCX, chunkCY, badgeR, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = "#ffffff";
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          ctx.fillStyle = "#ffffff";
+          ctx.font = `bold ${Math.round(badgeR * 1.15)}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(meta.char, chunkCX, chunkCY + 0.5);
+          ctx.restore();
+        }
+
+        // 干旱补偿模拟标记：虚线橙框 + 类型角标（仅演示，不代表真实位置）
+        if (item.droughtSim) {
+          const kind = item.droughtSim;
+          const dboxW = (gw * 51 / 60) * cellPx;
+          const dboxH = (gh * 51 / 60) * cellPx;
+          ctx.save();
+          ctx.strokeStyle = "#ff9d3c";
+          ctx.lineWidth = Math.max(2, cellPx * 0.06);
+          ctx.setLineDash([Math.max(3, cellPx * 0.12), Math.max(3, cellPx * 0.1)]);
+          ctx.strokeRect(chunkCX - dboxW * 0.5, chunkCY - dboxH * 0.5, dboxW, dboxH);
+          ctx.setLineDash([]);
+          const r = Math.max(8, Math.min(14, cellPx * 0.24));
+          ctx.fillStyle = "#ff9d3c";
+          ctx.beginPath();
+          ctx.arc(chunkCX, chunkCY - dboxH * 0.5, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = "#1a1f26";
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.fillStyle = "#1a1f26";
+          ctx.font = `bold ${Math.round(r * 1.1)}px sans-serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(kind === "Pool" ? "泳" : (kind === "ArtGallery" ? "馆" : "便"), chunkCX, chunkCY - dboxH * 0.5 + 1);
+          ctx.restore();
+        }
+
+        // 受限影响：可能被游戏留空/随机替换的区块
+        if (resolved.blockedByRestriction) {
+          const bw = (gw * 51 / 60) * cellPx;
+          const bh = (gh * 51 / 60) * cellPx;
+          ctx.save();
+          ctx.setLineDash([4, 4]);
+          ctx.strokeStyle = "rgba(255,107,107,0.85)";
+          ctx.lineWidth = Math.max(1.5, cellPx * 0.05);
+          ctx.strokeRect(chunkCX - bw * 0.5, chunkCY - bh * 0.5, bw, bh);
+          ctx.setLineDash([]);
+          if (cellPx >= 18) {
+            ctx.fillStyle = "rgba(255,107,107,0.9)";
+            ctx.font = `bold ${Math.round(Math.min(28, cellPx * 0.5))}px sans-serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText("?", chunkCX, chunkCY);
+          }
+          ctx.restore();
+        }
+
+        // 实测数据标记（来自游戏实际生成结果）
+        if (resolved.fromGame) {
+          const gW = (gw * 51 / 60) * cellPx;
+          const gH = (gh * 51 / 60) * cellPx;
+          ctx.save();
+          ctx.strokeStyle = "rgba(0, 212, 255, 0.8)";
+          ctx.lineWidth = Math.max(1.5, cellPx * 0.04);
+          ctx.strokeRect(chunkCX - gW * 0.5, chunkCY - gH * 0.5, gW, gH);
+          ctx.restore();
+        }
+      }
+
+      // 4. 可选：绘制 2 格地铁间距的虚线圈（切比雪夫半径 2.5 格边界 = 5x5 格范围）
+      if (showSubwayRing && subwayItems.length > 0) {
+        ctx.save();
+        ctx.strokeStyle = "#2ea043";
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([6, 4]);
+        for (let i = 0; i < subwayItems.length; i++) {
+          const s = subwayItems[i];
+          const span = 5 * cellPx;
+          ctx.strokeRect(s.cx - span * 0.5, s.cy - span * 0.5, span, span);
+        }
+        ctx.restore();
+      }
+
+      // 5. 出生点 (0,0) 标记：画绿色圆圈 #6ad39a + “出生点”标签（第 7.2 节）
+      // 角色当前位置
+      if (playerCell) {
+        const ps = cellToScreen(playerCell.x, playerCell.y, viewW, viewH);
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(ps.sx, ps.sy, Math.max(4, Math.min(9, cellPx * 0.14)), 0, Math.PI * 2);
+        ctx.fillStyle = "#00d4ff";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(8, 14, 20, 0.9)";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      const spawnScreen = cellToScreen(0, 0, viewW, viewH);
+      // === 出生点方向标：视野内看不到出生点时，贴边缘画箭头 ===
+      (function drawSpawnPointer() {
+        const margin = 34;
+        const cx0 = viewW * 0.5, cy0 = viewH * 0.5;
+        const dx = spawnScreen.sx - cx0;
+        const dy = spawnScreen.sy - cy0;
+        const halfW = viewW * 0.5 - margin;
+        const halfH = viewH * 0.5 - margin;
+        if (Math.abs(dx) <= halfW && Math.abs(dy) <= halfH) return;   // 已经在视野内
+
+        const tx = halfW / Math.max(1e-6, Math.abs(dx));
+        const ty = halfH / Math.max(1e-6, Math.abs(dy));
+        const t = Math.min(tx, ty);
+        const px = cx0 + dx * t;
+        const py = cy0 + dy * t;
+        const ang = Math.atan2(dy, dx);
+
+        // 箭头本体
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(ang);
+        ctx.beginPath();
+        ctx.moveTo(16, 0);
+        ctx.lineTo(-9, 9);
+        ctx.lineTo(-4, 0);
+        ctx.lineTo(-9, -9);
+        ctx.closePath();
+        ctx.fillStyle = "rgba(106, 211, 154, 0.95)";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(10, 14, 18, 0.9)";
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+        ctx.restore();
+
+        // 距离标签
+        const distM = Math.hypot(camX, camY) * 60;
+        const txt = distM >= 1000 ? `出生点 ${(distM / 1000).toFixed(1)} km` : `出生点 ${Math.round(distM)} m`;
+        ctx.save();
+        ctx.font = 'bold 12px "PingFang SC", "Microsoft YaHei", sans-serif';
+        const tw = ctx.measureText(txt).width;
+        // 往视野内侧推一点，避免贴边
+        const back = 26;
+        let lx = px - Math.cos(ang) * back;
+        let ly = py - Math.sin(ang) * back;
+        lx = Math.min(Math.max(lx, tw * 0.5 + 8), viewW - tw * 0.5 - 8);
+        ly = Math.min(Math.max(ly, 18), viewH - 18);
+        ctx.fillStyle = "rgba(12, 17, 23, 0.86)";
+        fillRoundRect(ctx, lx - tw * 0.5 - 8, ly - 10, tw + 16, 20, 6);
+        ctx.strokeStyle = "rgba(106, 211, 154, 0.8)";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(lx - tw * 0.5 - 8, ly - 10, tw + 16, 20);
+        ctx.fillStyle = "#6ad39a";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(txt, lx, ly + 1);
+        ctx.restore();
+      })();
+
+      ctx.save();
+      const spawnR = Math.max(8, cellPx * 0.38);
+      ctx.strokeStyle = "#6ad39a";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(spawnScreen.sx, spawnScreen.sy, spawnR, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.fillStyle = "rgba(106, 211, 154, 0.22)";
+      ctx.fill();
+
+      // 中心十字准星
+      ctx.beginPath();
+      ctx.moveTo(spawnScreen.sx - 5, spawnScreen.sy);
+      ctx.lineTo(spawnScreen.sx + 5, spawnScreen.sy);
+      ctx.moveTo(spawnScreen.sx, spawnScreen.sy - 5);
+      ctx.lineTo(spawnScreen.sx, spawnScreen.sy + 5);
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // 出生点文字标签
+      ctx.font = `bold 12px "PingFang SC", "Microsoft YaHei", sans-serif`;
+      const labelTxt = "出生点 (0,0)";
+      const txtW = ctx.measureText(labelTxt).width + 10;
+      const lblY = spawnScreen.sy - spawnR - 14;
+      ctx.fillStyle = "rgba(20, 24, 28, 0.85)";
+      fillRoundRect(ctx, spawnScreen.sx - txtW * 0.5, lblY - 9, txtW, 18, 4);
+      ctx.strokeStyle = "#6ad39a";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(spawnScreen.sx - txtW * 0.5, lblY - 9, txtW, 18);
+      ctx.fillStyle = "#6ad39a";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(labelTxt, spawnScreen.sx, lblY);
+      ctx.restore();
+
+      // 6. 鼠标悬停高亮框
+      if (hoverCell) {
+        const occItem = placement.occ.get(`${hoverCell.cx},${hoverCell.cy}`);
+        ctx.save();
+        if (occItem) {
+          const centerGX = occItem.anchorX + (occItem.gw - 1) * 0.5;
+          const centerGY = occItem.anchorY + (occItem.gh - 1) * 0.5;
+          const { sx, sy } = cellToScreen(centerGX, centerGY, viewW, viewH);
+          const wBox = occItem.gw * cellPx;
+          const hBox = occItem.gh * cellPx;
+          ctx.strokeStyle = "#58a6ff";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(sx - wBox * 0.5, sy - hBox * 0.5, wBox, hBox);
+        }
+        // 当前单格细虚线框
+        const { sx: csx, sy: csy } = cellToScreen(hoverCell.cx, hoverCell.cy, viewW, viewH);
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([3, 3]);
+        ctx.strokeRect(csx - cellPx * 0.5, csy - cellPx * 0.5, cellPx, cellPx);
+        ctx.restore();
+      }
+
+      // 7. 可选：圆形小地图暗角与白环描边（第 6 节）
+      if (showMinimapRing) {
+        const radius = Math.min(viewW, viewH) * 0.45;
+        const cx = viewW * 0.5;
+        const cy = viewH * 0.5;
+
+        ctx.save();
+        const grad = ctx.createRadialGradient(cx, cy, radius * 0.82, cx, cy, Math.max(viewW, viewH) * 0.72);
+        grad.addColorStop(0, "rgba(18, 22, 26, 0)");
+        grad.addColorStop(0.25, "rgba(18, 22, 26, 0.72)");
+        grad.addColorStop(1, "rgba(12, 15, 18, 0.94)");
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, viewW, viewH);
+
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.strokeStyle = "#e8eef0";
+        ctx.lineWidth = 3.5;
+        ctx.shadowColor = "rgba(0, 0, 0, 0.65)";
+        ctx.shadowBlur = 12;
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    function animationLoop() {
+      try {
+        render();                       // render 内部用 dirty 判断是否需要重绘
+      } catch (e) {
+        console.error("[render error]", e);
+        if (window.__showErr) window.__showErr(e);
+        dirty = false;                  // 出错也不要卡死循环
+      }
+      requestAnimationFrame(animationLoop);
+    }
+
+    // ============================================================================
+    // 4. 交互控制：缩放、拖拽、悬停提示、种子切换、跳转与统计验证
+    // ============================================================================
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let camStartX = 0;
+    let camStartY = 0;
+
+    const tooltipEl = document.getElementById("hover-tooltip");
+
+    function updateHoverInfo(clientX, clientY) {
+      const rect = hostEl.getBoundingClientRect();
+      const sx = clientX - rect.left;
+      const sy = clientY - rect.top;
+
+      if (sx < 0 || sy < 0 || sx > rect.width || sy > rect.height) {
+        hoverCell = null;
+        tooltipEl.style.display = "none";
+        markDirty();
+        return;
+      }
+
+      const { cx, cy } = screenToCell(sx, sy, rect.width, rect.height);
+      if (!hoverCell || hoverCell.cx !== cx || hoverCell.cy !== cy) {
+        hoverCell = { cx, cy };
+        markDirty();
+      }
+
+      const worldX = cx * 60;
+      const worldY = cy * 60;
+      const distMeters = Math.round(Math.hypot(worldX, worldY));
+
+      // 更新底部状态栏
+      document.getElementById("st-cell").textContent = `CELL (${cx}, ${cy})`;
+      document.getElementById("st-world").textContent = `(${worldX}m, ${worldY}m)`;
+      document.getElementById("st-dist").textContent = `${distMeters}m`;
+
+      // 从当前放置表反查该格实际所属区块
+      const occItem = lastPlacement.occ.get(`${cx},${cy}`);
+      const biome = biomeForCell(cx, cy);
+
+      if (!occItem) {
+        tooltipEl.style.display = "none";
+        return;
+      }
+
+      const res = occItem.resolved;
+      const cDef = res.chunkDef;
+      const poiBadge = res.primaryPoi
+        ? `<span class="tt-poi-star">★ ${POI_META[res.primaryPoi].name}</span>`
+        : "";
+
+      const anchorInfo = (occItem.gw > 1 || occItem.gh > 1)
+        ? `<div class="tt-row"><span class="tt-key">所属大区块锚点</span><span class="tt-val">(${occItem.anchorX}, ${occItem.anchorY}) [${occItem.gw}×${occItem.gh}]</span></div>`
+        : "";
+
+      const slotsHtml = res.zones.map((z, i) => {
+        const star = z.poi ? `<span class="tt-poi-star">★ </span>` : "";
+        return `<div class="tt-slot-item">#${i + 1} [${z.slot}] ${star}${z.name}</div>`;
+      }).join("");
+
+      const replacedHtml = res.subwayReplaced
+        ? `<div class="tt-warn">⚠️ 原为地铁候选，因 2 格地铁间距限制重抽为 Small 区块</div>`
+        : "";
+
+      tooltipEl.innerHTML = `
+        <div class="tt-title">
+          <span>CELL (${cx}, ${cy})</span>
+          ${poiBadge}
+        </div>
+        <div class="tt-row"><span class="tt-key">世界坐标</span><span class="tt-val">(${worldX}m, ${worldY}m)</span></div>
+        <div class="tt-row"><span class="tt-key">街区 (Biome)</span><span class="tt-val" style="color:${biome.tint === '#31465e' ? '#79b8ff' : biome.tint === '#2f5344' ? '#56d364' : '#d2a8ff'}">${biome.name} (${biome.label})</span></div>
+        <div class="tt-row"><span class="tt-key">区块 (Chunk)</span><span class="tt-val">${cDef.name} (${occItem.gw}×${occItem.gh})</span></div>
+        <div class="tt-row"><span class="tt-key">旋转角度</span><span class="tt-val">${res.rotation}°</span></div>
+        ${anchorInfo}
+        <div class="tt-slots">
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px;">槽位地块 (Zones):</div>
+          ${slotsHtml}
+        </div>
+        ${replacedHtml}
+      `;
+
+      tooltipEl.style.display = "block";
+      let tx = sx + 16;
+      let ty = sy + 16;
+      if (tx + 280 > rect.width) tx = sx - 285;
+      if (ty + 210 > rect.height) ty = sy - 210;
+      tooltipEl.style.left = `${Math.max(8, tx)}px`;
+      tooltipEl.style.top = `${Math.max(8, ty)}px`;
+    }
+
+    hostEl.addEventListener("mousedown", e => {
+      if (e.button !== 0) return;
+      isDragging = true;
+      hostEl.classList.add("dragging");
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+      camStartX = camX;
+      camStartY = camY;
+    });
+
+    window.addEventListener("mousemove", e => {
+      if (isDragging) {
+        const dx = e.clientX - dragStartX;
+        const dy = e.clientY - dragStartY;
+        camX = camStartX - dx / cellPx;
+        camY = camStartY + dy / cellPx;   // Y 向上：拖拽反向
+        markDirty();
+      }
+      updateHoverInfo(e.clientX, e.clientY);
+    });
+
+    window.addEventListener("mouseup", () => {
+      if (isDragging) {
+        isDragging = false;
+        hostEl.classList.remove("dragging");
+      }
+    });
+
+    hostEl.addEventListener("mouseleave", () => {
+      hoverCell = null;
+      tooltipEl.style.display = "none";
+      markDirty();
+    });
+
+    // 6. 滚轮以鼠标为中心缩放（10 ~ 90 px/格）
+    hostEl.addEventListener("wheel", e => {
+      e.preventDefault();
+      const rect = hostEl.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+
+      const before = screenToCell(sx, sy, rect.width, rect.height);
+      const factor = e.deltaY < 0 ? 1.14 : 1 / 1.14;
+      const nextPx = Math.max(10, Math.min(350, cellPx * factor));
+
+      if (nextPx !== cellPx) {
+        cellPx = nextPx;
+        camX = before.gx - (sx - rect.width * 0.5) / cellPx;
+        camY = before.gy + (sy - rect.height * 0.5) / cellPx;
+        markDirty();
+        updateHoverInfo(e.clientX, e.clientY);
+      }
+    }, { passive: false });
+
+    window.addEventListener("resize", () => markDirty());
+
+    // 顶部按钮事件绑定
+    const seedInput = document.getElementById("seed-input");
+
+    function applySeed(newSeed) {
+      const parsed = parseInt(newSeed, 10);
+      currentSeed = Number.isNaN(parsed) ? 0 : parsed;
+      seedInput.value = currentSeed;
+      clearSeedCaches();
+      markDirty();
+    }
+
+    document.getElementById("btn-apply-seed").addEventListener("click", () => {
+      applySeed(seedInput.value);
+      actualCells.clear();
+      actualVersion = 0;
+      playerCell = null;
+      updateSyncStatus();
+    });
+
+    seedInput.addEventListener("keydown", e => {
+      if (e.key === "Enter") applySeed(seedInput.value);
+    });
+
+    // 随机种子按钮（使用加密随机数或时间戳哈希，绝不调用 Math.random）
+    document.getElementById("btn-rand-seed").addEventListener("click", () => {
+      let nextSeed = 0;
+      if (window.crypto && window.crypto.getRandomValues) {
+        const buf = new Int32Array(1);
+        window.crypto.getRandomValues(buf);
+        nextSeed = Math.abs(buf[0]) % 1000000000;
+      } else {
+        nextSeed = hash(Date.now() & 0x7fffffff, 17, 31) % 1000000000;
+      }
+      applySeed(nextSeed);
+    });
+
+    // 坐标跳转（支持格坐标或米自动 ÷60）
+    function jumpToInput() {
+      const mode = document.getElementById("coord-mode").value;
+      const rawX = parseFloat(document.getElementById("jump-x").value) || 0;
+      const rawY = parseFloat(document.getElementById("jump-y").value) || 0;
+      if (mode === "meter") {
+        camX = Math.round(rawX / 60);
+        camY = Math.round(rawY / 60);
+      } else {
+        camX = rawX;
+        camY = rawY;
+      }
+      markDirty();
+    }
+
+    document.getElementById("btn-jump").addEventListener("click", jumpToInput);
+    document.getElementById("btn-origin").addEventListener("click", () => {
+      document.getElementById("jump-x").value = "0";
+      document.getElementById("jump-y").value = "0";
+      camX = 0;
+      camY = 0;
+      markDirty();
+    });
+
+    // 缩放快捷键
+    document.getElementById("btn-zoom-in").addEventListener("click", () => {
+      cellPx = Math.min(350, cellPx * 1.2);
+      markDirty();
+    });
+    document.getElementById("btn-zoom-out").addEventListener("click", () => {
+      cellPx = Math.max(10, cellPx / 1.2);
+      markDirty();
+    });
+    document.getElementById("btn-zoom-reset").addEventListener("click", () => {
+      cellPx = 36;
+      markDirty();
+    });
+
+    // 视图复选框
+    document.getElementById("chk-poi-only").addEventListener("change", e => {
+      poiOnlyMode = e.target.checked;
+      markDirty();
+    });
+    document.getElementById("chk-subway-ring").addEventListener("change", e => {
+      showSubwayRing = e.target.checked;
+      markDirty();
+    });
+    document.getElementById("chk-biome-tint").addEventListener("change", e => {
+      showBiomeTint = e.target.checked;
+      markDirty();
+    });
+    document.getElementById("chk-minimap-ring").addEventListener("change", e => {
+      showMinimapRing = e.target.checked;
+      markDirty();
+    });
+    document.getElementById("chk-drought-sim").addEventListener("change", e => {
+      showDroughtSim = e.target.checked;
+      const note = document.getElementById("drought-note");
+      if (note) note.style.display = e.target.checked ? "block" : "none";
+      markDirty();
+    });
+    document.getElementById("chk-follow").addEventListener("change", e => {
+      followPlayer = e.target.checked;
+      if (followPlayer && playerCell) { camX = playerCell.x; camY = playerCell.y; }
+      markDirty();
+    });
+    document.getElementById("chk-classic").addEventListener("change", e => {
+      showClassicRestrict = e.target.checked;
+      const note = document.getElementById("classic-note");
+      if (note) note.style.display = e.target.checked ? "block" : "none";
+      clearSeedCaches();
+      lastPlacement = null;
+      markDirty();
+    });
+    document.getElementById("btn-sync-load").addEventListener("click", () => {
+      document.getElementById("sync-file").click();
+    });
+    document.getElementById("sync-file").addEventListener("change", e => {
+      if (e.target.files && e.target.files[0]) loadActualFile(e.target.files[0]);
+    });
+    startSync();
+
+
+    // 初始化右侧图例
+    function initLegends() {
+      const biomeBox = document.getElementById("legend-biomes");
+      biomeBox.innerHTML = BIOMES.map(b => `
+        <div class="biome-chip">
+          <span class="color-dot" style="background:${b.tint}"></span>
+          <div>
+            <div style="font-weight:600;color:#fff;">${b.name}</div>
+            <div style="font-size:10px;color:var(--text-muted);">${b.label} (${b.weight}%)</div>
+          </div>
+        </div>
+      `).join("");
+
+      const poiBox = document.getElementById("legend-pois");
+      poiBox.innerHTML = Object.entries(POI_META).map(([key, meta]) => `
+        <div class="poi-chip" data-poi="${key}">
+          <span class="poi-badge" style="background:${meta.color}">${meta.char}</span>
+          <span>${meta.name}</span>
+        </div>
+      `).join("");
+
+      poiBox.querySelectorAll(".poi-chip").forEach(el => {
+        el.addEventListener("click", () => {
+          const clickedKey = el.getAttribute("data-poi");
+          activePoiFilter = (activePoiFilter === clickedKey) ? null : clickedKey;
+          poiBox.querySelectorAll(".poi-chip").forEach(c => {
+            const k = c.getAttribute("data-poi");
+            c.classList.toggle("dimmed", activePoiFilter !== null && k !== activePoiFilter);
+          });
+          markDirty();
+        });
+      });
+    }
+
+    // 第 9 节验收清单：400×400 大范围统计自检
+    document.getElementById("btn-verify-seed").addEventListener("click", () => {
+      const outEl = document.getElementById("verify-result");
+      outEl.style.display = "block";
+      outEl.textContent = "正在计算 400×400 (160,000 格) 放置与间距自检...";
+
+      setTimeout(() => {
+        const R = 200; // -200..199 共 400x400
+        const { occ, items } = buildVisiblePlacement(-R, R - 1, -R, R - 1);
+        let area3x3 = 0;
+        let area4x4 = 0;
+        let areaSub = 0;
+        let totalCount = 0;
+        const subCoords = [];
+
+        for (let y = -R; y < R; y++) {
+          for (let x = -R; x < R; x++) {
+            const it = occ.get(`${x},${y}`);
+            if (!it) continue;
+            totalCount++;
+            const cname = it.resolved.chunkDef.name;
+            if (cname === "Mono 3x3") area3x3++;
+            else if (cname === "Mono 4x4") area4x4++;
+            else if (cname === "Subway") {
+              areaSub++;
+              subCoords.push([x, y]);
+            }
+          }
+        }
+
+        // 检查地铁切比雪夫距离 >= 3
+        let minSubChebyshev = Infinity;
+        for (let i = 0; i < subCoords.length; i++) {
+          for (let j = i + 1; j < subCoords.length; j++) {
+            const d = Math.max(
+              Math.abs(subCoords[i][0] - subCoords[j][0]),
+              Math.abs(subCoords[i][1] - subCoords[j][1])
+            );
+            if (d < minSubChebyshev) minSubChebyshev = d;
+          }
+        }
+
+        // 检查出生点 x²+y²<=4 全是 Residential
+        let spawnAllRes = true;
+        for (let y = -2; y <= 2; y++) {
+          for (let x = -2; x <= 2; x++) {
+            if (x * x + y * y <= 4 && biomeForCell(x, y).name !== "Residential") {
+              spawnAllRes = false;
+            }
+          }
+        }
+
+        const p3 = ((area3x3 / totalCount) * 100).toFixed(2);
+        const p4 = ((area4x4 / totalCount) * 100).toFixed(2);
+        const pSub = ((areaSub / totalCount) * 100).toFixed(2);
+
+        outEl.innerHTML = `
+          <div><strong>[种子 ${currentSeed} · 400×400 验收结果]</strong></div>
+          <div>• 3×3 面积占比: <strong>${p3}%</strong> (目标 ≈ 6.7%)</div>
+          <div>• 4×4 面积占比: <strong>${p4}%</strong> (目标 ≈ 0.9%)</div>
+          <div>• 地铁面积占比: <strong>${pSub}%</strong> (目标 ≈ 0.26%)</div>
+          <div>• 地铁最小切比雪夫距离: <strong>${minSubChebyshev === Infinity ? "N/A" : minSubChebyshev}</strong> (要求 ≥ 3)</div>
+          <div>• 出生点 x²+y²≤4 全 Residential: <strong>${spawnAllRes ? "通过 ✓" : "失败 ✗"}</strong></div>
+        `;
+      }, 20);
+    });
+
+    initLegends();
+    updateAssetStatus();
+    requestAnimationFrame(animationLoop);
+  </script>
+<div id="errbar" style="position:fixed;left:0;right:0;bottom:0;max-height:30%;overflow:auto;background:#7a1f1f;color:#fff;font:12px/1.5 monospace;padding:8px 12px;display:none;z-index:9999;white-space:pre-wrap"></div>
+<script>
+window.__showErr = function(e){
+  var bar = document.getElementById("errbar");
+  if (!bar) return;
+  bar.style.display = "block";
+  bar.textContent += "[render] " + (e && e.message ? e.message : e) + "\n  " + ((e && e.stack) || "").split("\n").slice(0,3).join("\n  ") + "\n";
+};
+window.addEventListener("error", function(e){
+  var bar = document.getElementById("errbar");
+  if (!bar) return;
+  bar.style.display = "block";
+  bar.textContent += "[error] " + (e.message || "") + "\n  " + (e.filename||"") + ":" + (e.lineno||"") + "\n";
+});
+window.addEventListener("unhandledrejection", function(e){
+  var bar = document.getElementById("errbar");
+  if (!bar) return;
+  bar.style.display = "block";
+  bar.textContent += "[promise] " + (e.reason && e.reason.message || e.reason) + "\n";
+});
+</script>
+</body>
+</html>
